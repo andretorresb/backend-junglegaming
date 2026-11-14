@@ -16,9 +16,11 @@
     "test:unit": "bun test test/unit",
     "test:integration": "bun test test/integration",
     "test:concurrency": "bun test test/concurrency",
-    "migration:create": "MIKRO_ORM_CLI_CONFIG=mikro-orm.config.ts bun ./node_modules/@mikro-orm/cli/index.js migration:create",
-    "migration:up": "MIKRO_ORM_CLI_CONFIG=mikro-orm.config.ts bun ./node_modules/@mikro-orm/cli/index.js migration:up",
-    "migration:down": "MIKRO_ORM_CLI_CONFIG=mikro-orm.config.ts bun ./node_modules/@mikro-orm/cli/index.js migration:down"
+    "migration:create": "bun scripts/migrate.ts create",
+    "migration:up": "bun scripts/migrate.ts up",
+    "migration:down": "bun scripts/migrate.ts down",
+    "migration:reset": "bun scripts/migrate.ts reset",
+    "migration:status": "bun scripts/migrate.ts status"
   },
   "dependencies": {
     "@mikro-orm/core": "^6.4.0",
@@ -29,12 +31,13 @@
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "decimal.js": "^10.4.3",
+    "pg": "^8.13.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
-    "@mikro-orm/cli": "^6.4.0",
     "@types/bun": "latest",
+    "@types/pg": "^8.11.0",
     "typescript": "^5.7.0"
   }
 }

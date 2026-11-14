@@ -1,12 +1,12 @@
 import { defineConfig } from '@mikro-orm/postgresql';
 import { Migrator } from '@mikro-orm/migrations';
 import { loadEnv } from './src/config/env';
+import { PERSISTENCE_ENTITIES } from './src/infrastructure/persistence/entities/records';
 
 const env = loadEnv();
 
 /**
  * Configuração do MikroORM (usada pela aplicação e pela CLI `mikro-orm`).
- * Entidades de persistência serão adicionadas na Etapa 2.
  */
 export default defineConfig({
   host: env.database.host,
@@ -14,10 +14,8 @@ export default defineConfig({
   user: env.database.user,
   password: env.database.password,
   dbName: env.database.name,
-  entities: [],
-  entitiesTs: ['src/**/*.entity.ts'],
-  // Etapa 0 não possui entidades; elas são introduzidas na Etapa 2.
-  discovery: { warnWhenNoEntities: false },
+  entities: PERSISTENCE_ENTITIES,
+  discovery: { warnWhenNoEntities: true },
   extensions: [Migrator],
   migrations: {
     path: 'src/infrastructure/persistence/migrations',

@@ -3,7 +3,7 @@
 Serviço financeiro distribuído que processa transações de apostas de múltiplos provedores de jogos.
 Desafio técnico — Jungle Gaming.
 
-> Estado atual: **Etapa 0 (fundação)**. Ver [`ETAPAS.md`](./ETAPAS.md) e [`docs/specs/`](./docs/specs/).
+> Estado atual: **Etapa 2 (schema e migrations)**. Ver [`ETAPAS.md`](./ETAPAS.md) e [`docs/specs/`](./docs/specs/).
 
 ## Pré-requisitos
 
@@ -34,8 +34,11 @@ curl -s http://localhost:3000/health/live
 | `bun run start` | Sobe a aplicação sem watch |
 | `bun run typecheck` | Checagem de tipos (`tsc --noEmit`) |
 | `bun run test` | Executa a suíte de testes |
-| `bun run migration:up` | Aplica migrations (a partir da Etapa 2) |
-| `bun run migration:down` | Reverte a última migration (a partir da Etapa 2) |
+| `bun run migration:up` | Aplica migrations pendentes |
+| `bun run migration:down` | Reverte a última migration |
+| `bun run migration:reset` | Reverte todas as migrations |
+| `bun run migration:status` | Lista migrations executadas e pendentes |
+| `bun run test:integration` | Testes de schema e mapeamento (exige Postgres; usa o banco `junglegaming_test`) |
 
 ## Documentação
 

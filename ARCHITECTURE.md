@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 0 (fundação)**.
+Estado atual: **Etapa 2 (schema e migrations)**.
 
 ## 1. Stack
 
@@ -91,7 +91,33 @@ A validação de tipo da referência fica nesse método (fonte única). A valida
 - `debit` sem saldo lança `InsufficientBalanceError` antes de qualquer alteração.
 - Na Etapa 4, a reversão que faria saldo negativo será traduzida para `NEGATIVE_BALANCE_ON_REVERSAL` pela camada de aplicação.
 
-## 7. Pendências desta documentação
+## 7. Persistência (Etapa 2)
+
+### 7.1 Schema
+Tabelas: `wallets`, `wager_transactions`, `wallet_ledger_entries`, `inbox_messages`, `outbox_messages`. Migrations em `src/infrastructure/persistence/migrations`, cada uma com `up` e `down`.
+
+Garantias no banco:
+- `wallets`: `UNIQUE (player_id, currency)`; `CHECK (balance >= 0)`; `CHECK (version >= 1)`.
+- `wager_transactions`: `UNIQUE (provider_id, external_transaction_id)`; `UNIQUE (idempotency_key)`; `CHECK` de `kind`, `status` e amount > 0; REFUND/ROLLBACK exigem referência e BET/WIN/LOSS não aceitam; FK composta `(wallet_id, currency)` garante moeda igual à da wallet.
+- `wallet_ledger_entries`: trigger `BEFORE UPDATE OR DELETE` bloqueia alteração (imutabilidade); `UNIQUE (wallet_id, transaction_id)` (no máximo um lançamento por transação e wallet); `CHECK` de direção, amount > 0 e saldos não negativos; FK composta de moeda.
+- `inbox_messages`: PK `(consumer_name, message_id)`.
+- `outbox_messages`: índice parcial para eventos pendentes; `attempts >= 0`; `payload` deve ser objeto JSON.
+
+### 7.2 Tipos
+- Dinheiro: `numeric(19,2)`. Nenhuma coluna monetária usa float ou double.
+- Identificadores internos e `player_id`/`wallet_id`: `uuid`. Identificadores do provedor e `round_id`/`game_id`: `text`.
+- `payload_hash`: `char(64)` (SHA-256 hexadecimal).
+
+### 7.3 Limitações conhecidas
+- O banco não garante que toda alteração de saldo tenha lançamento correspondente (exigiria trigger de consistência entre tabelas). Essa invariante é garantida pela camada de domínio (`Wallet` e `WalletLedgerEntry`) e verificada pelo helper `assertLedgerInvariant` nos testes (Etapas 3 a 10).
+- `TRUNCATE` não é bloqueado pela trigger (que é de linha). Ele é usado apenas nos testes.
+- `numeric(19,2)` arredonda entradas com mais casas; a validação de escala é feita antes pelo `Money`.
+
+### 7.4 Execução de migrations
+- `bun run migration:up`, `migration:down`, `migration:reset`, `migration:status`, `migration:create <nome>`.
+- Usa `scripts/migrate.ts` (API programática do MikroORM). A CLI `mikro-orm` v6 não aplica migrations com config TypeScript sob Bun: termina com código 0 e não faz nada.
+
+## 8. Pendências desta documentação
 
 Serão preenchidas nas etapas seguintes conforme o plano em `ETAPAS.md` e as specs em `docs/specs/`:
 - Estratégia de lock e idempotência (Etapa 3).
