@@ -7,7 +7,6 @@ import { assertLedgerInvariant, command, countRows, fixedClock, seedWallet, useC
 import {
   IdempotencyConflictError,
   InternalOnlyKindError,
-  KindNotSupportedYetError,
   WalletNotFoundError,
 } from '../../../src/application/wagering/errors';
 import { FailureCode } from '../../../src/domain/failure-code';
@@ -148,13 +147,6 @@ describe('ProcessWagerTransaction — regras (BET, WIN, LOSS, replay e conflito)
     await expect(
       useCase(em).execute(command({ walletId: w.walletId, playerId: w.playerId, kind: 'OPENING', amount: '1.00' })),
     ).rejects.toBeInstanceOf(InternalOnlyKindError);
-  });
-
-  it('REFUND e ROLLBACK ainda não são suportados nesta etapa (chegam na Etapa 4)', async () => {
-    const w = await seedWallet(client, { balance: '100.00' });
-    await expect(
-      useCase(em).execute(command({ walletId: w.walletId, playerId: w.playerId, kind: 'REFUND', amount: '1.00' })),
-    ).rejects.toBeInstanceOf(KindNotSupportedYetError);
   });
 
   it('moeda diferente da wallet: rejeitado antes de persistir, com CURRENCY_MISMATCH', async () => {

@@ -4,7 +4,7 @@ import {
   ApplicationError,
   IdempotencyConflictError,
   InternalOnlyKindError,
-  KindNotSupportedYetError,
+  DuplicateWalletError,
   RejectedBeforePersistenceError,
   TransientInfrastructureError,
   UniqueViolationError,
@@ -16,7 +16,7 @@ import { FailureCode } from '../../../domain/failure-code';
 /**
  * Mapeamento único de erros para HTTP (seção 9 do enunciado).
  *   400 payload inválido · 404 não encontrado · 409 conflito · 422 rejeição de negócio
- *   501 ainda não suportado · 503 falha transitória (com Retry-After)
+ *   503 falha transitória (com Retry-After)
  */
 @Catch()
 export class ApplicationErrorFilter implements ExceptionFilter {
@@ -63,8 +63,8 @@ export class ApplicationErrorFilter implements ExceptionFilter {
 function applicationStatus(error: ApplicationError): number {
   if (error instanceof WalletNotFoundError) return 404;
   if (error instanceof IdempotencyConflictError || error instanceof UniqueViolationError) return 409;
+  if (error instanceof DuplicateWalletError) return 409;
   if (error instanceof InternalOnlyKindError) return 400;
-  if (error instanceof KindNotSupportedYetError) return 501;
   if (error instanceof TransientInfrastructureError) return 503;
   return 500;
 }

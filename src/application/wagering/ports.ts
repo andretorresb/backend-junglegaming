@@ -18,9 +18,12 @@ export interface OutboxEnvelope {
 export interface WagerRepositories {
   /** SELECT ... FOR UPDATE na linha da wallet. Serializa operações da mesma wallet. */
   lockWallet(walletId: string): Promise<Wallet | undefined>;
+  insertWallet(wallet: Wallet): Promise<void>;
   saveWallet(wallet: Wallet, previousVersion: number): Promise<void>;
   findTransactionByIdempotencyKey(key: string): Promise<WagerTransaction | undefined>;
   findTransactionByProviderExternalId(providerId: string, externalTransactionId: string): Promise<WagerTransaction | undefined>;
+  /** Reversão já processada que aponta para esta transação (REFUND ou ROLLBACK), se existir. */
+  findProcessedReversalOf(referenceTransactionId: string): Promise<WagerTransaction | undefined>;
   insertTransaction(tx: WagerTransaction): Promise<void>;
   insertLedgerEntry(entry: WalletLedgerEntry): Promise<void>;
   enqueueOutbox(message: OutboxEnvelope): Promise<void>;

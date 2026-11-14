@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 3 (núcleo financeiro)**.
+Estado atual: **Etapa 4 (wallets e reversões)**.
 
 ## 1. Stack
 
@@ -159,7 +159,44 @@ Se duas requisições com chaves diferentes e o mesmo `(provider, externalTransa
 - `test/concurrency/`: 50 chamadas idênticas em paralelo (1 débito), corrida 80 + 80 sobre saldo 100 (1 PROCESSED, 1 REJECTED, saldo 20), chaves iguais em wallets diferentes, três wallets em paralelo, 30 apostas de 5 sobre saldo 100 (exatamente 20 processadas), e lock travado (503).
 - `assertLedgerInvariant` roda ao fim de cada teste que altera saldo.
 
-## 9. Pendências desta documentação
+## 9. Wallets e reversões (Etapa 4)
+
+### 9.1 POST /wallets
+- Saldo inicial > 0: wallet, transação interna `OPENING` (PROCESSED) e lançamento CREDIT na mesma transação SQL, com evento `WalletBalanceChanged`.
+- Saldo zero: só a wallet. Sem OPENING, sem lançamento, sem evento.
+- Duplicata (`playerId` + `currency`): a unicidade do banco é a proteção. A violação vira `DUPLICATE_WALLET` (409). Não há checagem prévia, para não haver janela de corrida.
+- **Sem `Idempotency-Key`:** criar a wallet de novo com os mesmos dados já retorna 409, que é uma resposta determinística. Decidido não exigir header nesta etapa.
+- Saldo negativo: 400, antes de qualquer escrita.
+
+### 9.2 Referência ausente nesta etapa
+- REFUND ou ROLLBACK com referência inexistente é persistido como `REJECTED` com `REFERENCE_NOT_FOUND`.
+- A Etapa 5 troca este caso por `PENDING_REFERENCE`, com reprocessamento. O comportamento atual é provisório.
+
+### 9.3 Regras de reversão (`src/domain/wagering/reversal-rules.ts`)
+Ordem de validação, na primeira falha:
+1. referência ausente → `REFERENCE_NOT_FOUND`;
+2. jogador, wallet, rodada, provedor ou moeda diferentes → `REFERENCE_CONTEXT_MISMATCH`;
+3. tipo não permitido (REFUND: só BET; ROLLBACK: BET, WIN ou REFUND) → `REFERENCE_TYPE_NOT_ALLOWED`;
+4. referência não `PROCESSED` → `REFERENCE_NOT_PROCESSED`;
+5. referência já revertida → `REFERENCE_ALREADY_REVERSED`;
+6. valor diferente → `AMOUNT_MISMATCH_ON_REVERSAL`;
+7. reversão que debitaria sem saldo → `NEGATIVE_BALANCE_ON_REVERSAL` (código distinto de `INSUFFICIENT_BALANCE`).
+
+A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da regra de inversão.
+
+### 9.4 Interpretação: uma transação é revertida no máximo uma vez
+- A regra 4 do enunciado diz "não pode ser revertida duas vezes **pelo mesmo tipo** de operação".
+- Pela leitura literal, um REFUND e um ROLLBACK da mesma BET creditariam duas vezes um único débito. Isto viola a invariante "não pode duplicar créditos".
+- Adotei: **no máximo uma reversão processada por transação, qualquer que seja o tipo.**
+- Garantia no banco: índice único parcial `wt_single_processed_reversal_uq` sobre `reference_transaction_id` onde `kind IN (REFUND, ROLLBACK) AND status = PROCESSED`. Uma reversão rejeitada não bloqueia outra.
+
+### 9.5 Testes
+- `test/unit/domain/reversal-rules.spec.ts`: matriz de validação.
+- `test/integration/reversals/`: 17 casos da matriz, incluindo replay e o índice.
+- `test/integration/wallets/`: criação de wallet, duplicata e atomicidade (falha na outbox desfaz tudo).
+- `test/concurrency/reversal-concurrency.spec.ts`: REFUND e ROLLBACK simultâneos, 20 REFUNDs paralelos, ROLLBACK de WIN com apostas concorrentes.
+
+## 10. Pendências desta documentação
 
 Serão preenchidas nas etapas seguintes conforme o plano em `ETAPAS.md` e as specs em `docs/specs/`:
 - Estratégia de lock e idempotência (Etapa 3).

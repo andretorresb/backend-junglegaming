@@ -163,13 +163,20 @@ describe('HTTP — POST /wagering/transactions e consultas', () => {
     expect(res.body['code']).toBe('INTERNAL_ONLY_KIND');
   });
 
-  it('kind REFUND → 501 (chega na Etapa 4)', async () => {
+  it('REFUND sem referência existente → 422 REFERENCE_NOT_FOUND', async () => {
     const w = await seedWallet(client, { balance: '1000.00' });
     const res = await post(
-      betBody(w.walletId, w.playerId, { kind: 'REFUND', referenceExternalTransactionId: 'bet-1' }),
+      betBody(w.walletId, w.playerId, { kind: 'REFUND', referenceExternalTransactionId: 'bet-missing' }),
       { 'idempotency-key': 'k-refund' },
     );
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(422);
+    expect(res.body).toMatchObject({ status: 'REJECTED', failureCode: 'REFERENCE_NOT_FOUND' });
+  });
+
+  it('REFUND sem referenceExternalTransactionId → 400', async () => {
+    const w = await seedWallet(client, { balance: '1000.00' });
+    const res = await post(betBody(w.walletId, w.playerId, { kind: 'REFUND' }), { 'idempotency-key': 'k-refund-2' });
+    expect(res.status).toBe(400);
   });
 
   it('wallet inexistente → 404', async () => {

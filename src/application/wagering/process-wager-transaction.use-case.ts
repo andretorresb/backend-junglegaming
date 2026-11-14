@@ -1,9 +1,11 @@
 import { computePayloadHash } from '../../domain/wagering/payload-hash';
 import { FailureCode } from '../../domain/failure-code';
-import { InsufficientBalanceError } from '../../domain/errors';
+import { InsufficientBalanceError, InvalidInvariantError } from '../../domain/errors';
+import { LedgerDirection } from '../../domain/ledger/ledger-direction';
 import { Money, type MoneyProps } from '../../domain/money/money';
 import { WalletLedgerEntry } from '../../domain/wallet/wallet-ledger-entry';
 import type { Wallet, WalletMovement } from '../../domain/wallet/wallet';
+import { validateReversalReference } from '../../domain/wagering/reversal-rules';
 import {
   WagerTransaction,
   WagerTransactionKind,
@@ -13,12 +15,12 @@ import type { Clock } from '../ports/clock';
 import {
   IdempotencyConflictError,
   InternalOnlyKindError,
-  KindNotSupportedYetError,
   RejectedBeforePersistenceError,
   UniqueViolationError,
   WalletNotFoundError,
 } from './errors';
 import type { OutboxEnvelope, WagerRepositories, WagerUnitOfWork } from './ports';
+import { createEnvelope } from './envelope';
 
 export interface ProcessWagerTransactionCommand {
   idempotencyKey: string;
@@ -30,6 +32,8 @@ export interface ProcessWagerTransactionCommand {
   gameId: string;
   kind: WagerTransactionKind;
   money: MoneyProps;
+  /** Obrigatório para REFUND e ROLLBACK: id externo da transação revertida. */
+  referenceExternalTransactionId?: string | undefined;
   correlationId: string;
 }
 
@@ -48,7 +52,8 @@ export interface ProcessWagerTransactionResult {
  *   1. trava a wallet (SELECT ... FOR UPDATE);
  *   2. procura a Idempotency-Key: replay ou conflito;
  *   3. valida jogador e moeda contra a wallet;
- *   4. aplica a regra e persiste transação, ledger, saldo e outbox juntos.
+ *   4. resolve a referência (REFUND/ROLLBACK) e aplica a regra;
+ *   5. persiste transação, lançamento, saldo e outbox juntos.
  *
  * Travar antes de consultar a idempotência faz requisições idênticas se serializarem:
  * a segunda só lê a transação depois que a primeira comitou.
@@ -61,7 +66,7 @@ export class ProcessWagerTransaction {
   ) {}
 
   async execute(command: ProcessWagerTransactionCommand): Promise<ProcessWagerTransactionResult> {
-    assertSupportedKind(command.kind);
+    if (command.kind === WagerTransactionKind.Opening) throw new InternalOnlyKindError();
     const money = Money.fromInput(command.money);
     const payloadHash = computePayloadHash({
       providerId: command.providerId,
@@ -72,14 +77,14 @@ export class ProcessWagerTransaction {
       gameId: command.gameId,
       kind: command.kind,
       money: money.toJSON(),
-      referenceExternalTransactionId: null,
+      referenceExternalTransactionId: command.referenceExternalTransactionId ?? null,
     });
 
     try {
       return await this.attempt(command, money, payloadHash);
     } catch (error) {
-      // Corrida rara entre chaves diferentes com o mesmo external id: a segunda tentativa
-      // enxerga a linha já comitada e cai em replay ou conflito.
+      // Corrida rara entre chaves diferentes com o mesmo external id (ou dupla reversão concorrente):
+      // a segunda tentativa enxerga a linha já comitada e cai em replay, conflito ou rejeição.
       if (error instanceof UniqueViolationError) {
         return this.attempt(command, money, payloadHash);
       }
@@ -129,6 +134,12 @@ export class ProcessWagerTransaction {
       );
     }
 
+    // Reversões: resolve a referência e verifica se ela já foi revertida.
+    const reference = isReversal(command.kind) && command.referenceExternalTransactionId
+      ? await repos.findTransactionByProviderExternalId(command.providerId, command.referenceExternalTransactionId)
+      : undefined;
+    const alreadyReversed = reference ? (await repos.findProcessedReversalOf(reference.id)) !== undefined : false;
+
     const now = this.clock.now();
     const tx = WagerTransaction.create({
       id: this.nextId(),
@@ -142,10 +153,12 @@ export class ProcessWagerTransaction {
       gameId: command.gameId,
       kind: command.kind,
       money,
+      referenceExternalTransactionId: command.referenceExternalTransactionId,
+      referenceTransactionId: reference?.id,
       createdAt: now,
     });
 
-    const movement = applyRule(tx, wallet, money, now);
+    const movement = applyRule(tx, wallet, now, { reference, alreadyReversed });
 
     await repos.insertTransaction(tx);
 
@@ -205,34 +218,29 @@ export class ProcessWagerTransaction {
     aggregateId: string,
     data: Record<string, unknown>,
   ): OutboxEnvelope {
-    const eventId = this.nextId();
-    return {
-      id: eventId,
-      aggregateId,
-      eventType,
-      occurredAt,
-      payload: {
-        eventId,
-        eventType,
-        aggregateId,
-        correlationId: command.correlationId,
-        occurredAt: occurredAt.toISOString(),
-        version: 1,
-        data,
-      },
-    };
+    return createEnvelope({ nextId: this.nextId, correlationId: command.correlationId, occurredAt, eventType, aggregateId, data });
   }
+}
+
+interface ReversalContext {
+  reference: WagerTransaction | undefined;
+  alreadyReversed: boolean;
 }
 
 /**
  * Aplica a regra do kind à wallet e ao status da transação.
  * Retorna a movimentação, ou `undefined` quando não há efeito no saldo (LOSS ou rejeição).
  */
-function applyRule(tx: WagerTransaction, wallet: Wallet, money: Money, now: Date): WalletMovement | undefined {
+function applyRule(
+  tx: WagerTransaction,
+  wallet: Wallet,
+  now: Date,
+  reversal: ReversalContext,
+): WalletMovement | undefined {
   switch (tx.kind) {
-    case WagerTransactionKind.Bet: {
+    case WagerTransactionKind.Bet:
       try {
-        const movement = wallet.debit(money, now);
+        const movement = wallet.debit(tx.money, now);
         tx.markProcessed(undefined, now, wallet.balance);
         return movement;
       } catch (error) {
@@ -240,18 +248,59 @@ function applyRule(tx: WagerTransaction, wallet: Wallet, money: Money, now: Date
         tx.reject(FailureCode.InsufficientBalance, wallet.balance);
         return undefined;
       }
-    }
+
     case WagerTransactionKind.Win: {
-      const movement = wallet.credit(money, now);
+      const movement = wallet.credit(tx.money, now);
       tx.markProcessed(undefined, now, wallet.balance);
       return movement;
     }
+
     case WagerTransactionKind.Loss:
       tx.markProcessed(undefined, now, wallet.balance);
       return undefined;
+
+    case WagerTransactionKind.Refund:
+    case WagerTransactionKind.Rollback:
+      return applyReversal(tx, wallet, now, reversal);
+
     default:
-      throw new KindNotSupportedYetError(tx.kind);
+      throw new InvalidInvariantError(`kind ${tx.kind} não tem regra de aplicação`);
   }
+}
+
+function applyReversal(
+  tx: WagerTransaction,
+  wallet: Wallet,
+  now: Date,
+  { reference, alreadyReversed }: ReversalContext,
+): WalletMovement | undefined {
+  const rejection = validateReversalReference(tx, reference, alreadyReversed);
+  if (rejection !== undefined || reference === undefined) {
+    tx.reject(rejection ?? FailureCode.ReferenceNotFound, wallet.balance);
+    return undefined;
+  }
+
+  const direction = tx.ledgerDirectionFor(reference);
+  if (direction === LedgerDirection.Credit) {
+    const movement = wallet.credit(tx.money, now);
+    tx.markProcessed(reference.id, now, wallet.balance);
+    return movement;
+  }
+
+  // Reversão que debitaria: se o saldo não cobre, é rejeitada com código próprio (regra 9).
+  try {
+    const movement = wallet.debit(tx.money, now);
+    tx.markProcessed(reference.id, now, wallet.balance);
+    return movement;
+  } catch (error) {
+    if (!(error instanceof InsufficientBalanceError)) throw error;
+    tx.reject(FailureCode.NegativeBalanceOnReversal, wallet.balance);
+    return undefined;
+  }
+}
+
+function isReversal(kind: WagerTransactionKind): boolean {
+  return kind === WagerTransactionKind.Refund || kind === WagerTransactionKind.Rollback;
 }
 
 function replayResult(stored: WagerTransaction, wallet: Wallet): ProcessWagerTransactionResult {
@@ -262,11 +311,4 @@ function replayResult(stored: WagerTransaction, wallet: Wallet): ProcessWagerTra
     failureCode: stored.failureCode,
     idempotentReplay: true,
   };
-}
-
-function assertSupportedKind(kind: WagerTransactionKind): void {
-  if (kind === WagerTransactionKind.Opening) throw new InternalOnlyKindError();
-  if (kind === WagerTransactionKind.Refund || kind === WagerTransactionKind.Rollback) {
-    throw new KindNotSupportedYetError(kind);
-  }
 }

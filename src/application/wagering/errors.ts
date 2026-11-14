@@ -32,13 +32,6 @@ export class InternalOnlyKindError extends ApplicationError {
   }
 }
 
-/** Kinds ainda não implementados nesta etapa (REFUND e ROLLBACK chegam na Etapa 4). */
-export class KindNotSupportedYetError extends ApplicationError {
-  constructor(kind: string) {
-    super(`kind ${kind} ainda não é suportado`, 'KIND_NOT_SUPPORTED_YET');
-  }
-}
-
 /**
  * Rejeição de validação de contexto (moeda ou jogador divergentes).
  * A transação NÃO é persistida: a FK (wallet_id, currency) do banco impediria, e a
@@ -62,7 +55,14 @@ export class TransientInfrastructureError extends ApplicationError {
  * Causada por uma requisição concorrente com a mesma chave; o caso de uso tenta de novo uma vez.
  */
 export class UniqueViolationError extends ApplicationError {
-  constructor(constraint: string) {
+  constructor(public readonly constraint: string) {
     super(`violação de unicidade: ${constraint}`, 'UNIQUE_VIOLATION');
+  }
+}
+
+/** Wallet já existe para o mesmo playerId + currency. */
+export class DuplicateWalletError extends ApplicationError {
+  constructor(playerId: string, currency: string) {
+    super(`já existe wallet para o jogador ${playerId} em ${currency}`, 'DUPLICATE_WALLET', FailureCode.DuplicateWallet);
   }
 }

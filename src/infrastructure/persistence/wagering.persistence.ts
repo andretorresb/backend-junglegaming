@@ -36,6 +36,10 @@ export class MikroOrmWagerRepositories implements WagerRepositories {
     return record ? walletFromRecord(record) : undefined;
   }
 
+  async insertWallet(wallet: Wallet): Promise<void> {
+    await this.em.insert(WalletRecord, walletToRecord(wallet));
+  }
+
   async saveWallet(wallet: Wallet, previousVersion: number): Promise<void> {
     const data = walletToRecord(wallet);
     // Guarda de versão: com o lock, a versão nunca diverge. Se diverge, há um bug e a operação falha.
@@ -59,6 +63,15 @@ export class MikroOrmWagerRepositories implements WagerRepositories {
     externalTransactionId: string,
   ): Promise<WagerTransaction | undefined> {
     const record = await this.em.findOne(WagerTransactionRecord, { providerId, externalTransactionId });
+    return record ? wagerTransactionFromRecord(record) : undefined;
+  }
+
+  async findProcessedReversalOf(referenceTransactionId: string): Promise<WagerTransaction | undefined> {
+    const record = await this.em.findOne(WagerTransactionRecord, {
+      referenceTransactionId,
+      kind: { $in: ['REFUND', 'ROLLBACK'] },
+      status: 'PROCESSED',
+    });
     return record ? wagerTransactionFromRecord(record) : undefined;
   }
 

@@ -54,6 +54,8 @@ export interface CreateWagerTransactionProps {
   kind: WagerTransactionKind;
   money: Money;
   referenceExternalTransactionId?: string | undefined;
+  /** Id interno da transação referenciada, quando já resolvida (REFUND/ROLLBACK). */
+  referenceTransactionId?: string | undefined;
   createdAt: Date;
 }
 
@@ -161,7 +163,7 @@ export class WagerTransaction {
     return new WagerTransaction({
       ...props,
       referenceExternalTransactionId: reference,
-      referenceTransactionId: undefined,
+      referenceTransactionId: props.referenceTransactionId,
       failureCode: undefined,
       processedAt: undefined,
       observedBalance: undefined,
@@ -222,15 +224,16 @@ export class WagerTransaction {
    */
   markProcessed(referenceTransactionId: string | undefined, at: Date, observedBalance?: Money): void {
     this.assertTransitionFrom([WagerTransactionStatus.Pending, WagerTransactionStatus.PendingReference], 'PROCESSED');
+    const effective = referenceTransactionId ?? this._referenceTransactionId;
     const requiresReference = this.requiresReference();
-    if (requiresReference && (referenceTransactionId === undefined || referenceTransactionId === '')) {
+    if (requiresReference && (effective === undefined || effective === '')) {
       throw new InvalidTransactionStateError(`${this.kind} processado exige referenceTransactionId`);
     }
-    if (!requiresReference && referenceTransactionId !== undefined) {
+    if (!requiresReference && effective !== undefined) {
       throw new InvalidTransactionStateError(`${this.kind} não referencia outra transação`);
     }
     this._status = WagerTransactionStatus.Processed;
-    this._referenceTransactionId = referenceTransactionId;
+    this._referenceTransactionId = effective;
     this._processedAt = at;
     this._observedBalance = observedBalance;
   }

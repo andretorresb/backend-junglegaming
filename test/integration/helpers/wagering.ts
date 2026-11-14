@@ -69,9 +69,9 @@ export async function countRows(client: Client, sql: string, params: unknown[] =
 }
 
 export interface CommandOverrides {
-  idempotencyKey?: string;
-  providerId?: string;
-  externalTransactionId?: string;
+  idempotencyKey?: string | undefined;
+  providerId?: string | undefined;
+  externalTransactionId?: string | undefined;
   playerId: string;
   walletId: string;
   kind?: 'BET' | 'WIN' | 'LOSS' | 'OPENING' | 'REFUND' | 'ROLLBACK';
@@ -80,7 +80,7 @@ export interface CommandOverrides {
 }
 
 /** Monta o comando do caso de uso. A chave padrão segue o enunciado: provider:externalTransactionId. */
-export function command(overrides: CommandOverrides & { externalTransactionId?: string }) {
+export function command(overrides: CommandOverrides) {
   const externalTransactionId = overrides.externalTransactionId ?? `tx-${randomUUID()}`;
   const providerId = overrides.providerId ?? 'provider-a';
   return {

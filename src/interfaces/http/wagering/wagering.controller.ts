@@ -52,6 +52,7 @@ export class WagerController {
       gameId: dto.gameId,
       kind: dto.kind,
       money: { amount: dto.money.amount, currency: dto.money.currency },
+      referenceExternalTransactionId: dto.referenceExternalTransactionId,
       correlationId: idempotencyKey,
     });
 
