@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 2 (schema e migrations)**.
+Estado atual: **Etapa 3 (núcleo financeiro)**.
 
 ## 1. Stack
 
@@ -117,7 +117,49 @@ Garantias no banco:
 - `bun run migration:up`, `migration:down`, `migration:reset`, `migration:status`, `migration:create <nome>`.
 - Usa `scripts/migrate.ts` (API programática do MikroORM). A CLI `mikro-orm` v6 não aplica migrations com config TypeScript sob Bun: termina com código 0 e não faz nada.
 
-## 8. Pendências desta documentação
+## 8. Núcleo financeiro (Etapa 3)
+
+### 8.1 Estratégia de concorrência: lock pessimista por wallet
+- `SELECT ... FOR UPDATE` na linha da wallet, dentro da mesma transação SQL de toda a operação.
+- Unidade de concorrência: `walletId`. Não há lock global. Wallets distintas processam em paralelo.
+- **Por que pessimista e não otimista:** a wallet é uma hot spot por natureza (apostas em sequência do mesmo jogador). Optimistic locking com retry faria a maioria das requisições concorrentes dar retry e, sob carga, ultrapassar o limite de tentativas. O lock serializa a fila de forma previsível.
+- Guarda de versão no `UPDATE` (`WHERE version = <anterior>`): com o lock nunca diverge; se diverge, a operação falha em vez de sobrescrever.
+- `lock_timeout = 2s` por transação (`SET LOCAL`). Espera acima disso vira `TRANSIENT_UNAVAILABLE` (HTTP 503 com `Retry-After: 1`). Nada é gravado.
+
+### 8.2 Ordem das operações dentro da transação
+1. Trava a wallet.
+2. Procura a `Idempotency-Key`: replay (mesmo hash) ou conflito (hash diferente).
+3. Procura `(providerId, externalTransactionId)`: se existir com outra chave, conflito.
+4. Valida jogador e moeda contra a wallet.
+5. Aplica a regra, grava transação, lançamento, saldo e outbox juntos.
+
+**Por que travar antes de checar a idempotência:** requisições idênticas ficam na fila do lock. A segunda só lê a transação depois que a primeira comitou. Assim a corrida de idempotência é resolvida pela serialização, e o `UNIQUE` no banco fica como garantia final.
+
+### 8.3 Replay devolve o saldo observado
+- `balance_observed` (migration `Migration20261114120300`) guarda o saldo da wallet no momento da decisão.
+- Um replay devolve esse saldo, e não o saldo atual. A regra 7 do enunciado exige isso.
+
+### 8.4 Rejeições
+- **Por regra de negócio** (saldo insuficiente): a transação é persistida como `REJECTED`, com evento e sem lançamento. Isto é um resultado auditável, não uma exceção que desfaz a transação.
+- **Por contexto** (moeda ou jogador divergentes): **não são persistidas**. A FK composta `(wallet_id, currency)` impediria o registro, e a rejeição é determinística para o mesmo payload. Resposta 422 com `failureCode`. Limitação: essas tentativas não ficam auditadas no banco.
+- Payload inválido (incluindo valor com 3 casas ou negativo): 400, antes de qualquer escrita.
+
+### 8.5 Corrida entre chaves diferentes com o mesmo external id
+Se duas requisições com chaves diferentes e o mesmo `(provider, externalTransactionId)` chegarem juntas em wallets diferentes, uma delas recebe `UNIQUE_VIOLATION` (SQLSTATE 23505). O caso de uso repete a operação uma vez; a segunda tentativa enxerga a linha comitada e responde conflito.
+
+### 8.6 Escopo desta etapa
+- Kinds suportados: `BET`, `WIN`, `LOSS`.
+- `OPENING`: recusado com 400 `INTERNAL_ONLY_KIND` (interno).
+- `REFUND` e `ROLLBACK`: 501 `KIND_NOT_SUPPORTED_YET`. Implementados na Etapa 4.
+- Eventos gravados na outbox com envelope provisório (`eventId`, `eventType`, `aggregateId`, `correlationId`, `occurredAt`, `version`, `data`). A forma final, com classes `IntegrationEvent`, chega na Etapa 7.
+- Publicação no SQS: fora de escopo (Etapa 7).
+
+### 8.7 Testes
+- `test/integration/wagering/`: regras, replay, conflito, rejeições, e a matriz HTTP (status codes, validação, 503).
+- `test/concurrency/`: 50 chamadas idênticas em paralelo (1 débito), corrida 80 + 80 sobre saldo 100 (1 PROCESSED, 1 REJECTED, saldo 20), chaves iguais em wallets diferentes, três wallets em paralelo, 30 apostas de 5 sobre saldo 100 (exatamente 20 processadas), e lock travado (503).
+- `assertLedgerInvariant` roda ao fim de cada teste que altera saldo.
+
+## 9. Pendências desta documentação
 
 Serão preenchidas nas etapas seguintes conforme o plano em `ETAPAS.md` e as specs em `docs/specs/`:
 - Estratégia de lock e idempotência (Etapa 3).

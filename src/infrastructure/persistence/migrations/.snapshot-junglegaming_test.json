@@ -585,6 +585,22 @@
           "comment": null,
           "enumItems": [],
           "mappedType": "datetime"
+        },
+        "balance_observed": {
+          "name": "balance_observed",
+          "type": "numeric(19,2)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": 19,
+          "scale": 2,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "decimal"
         }
       },
       "name": "wager_transactions",
@@ -663,6 +679,12 @@
           "expression": "amount > 0"
         },
         {
+          "name": "wt_balance_observed_non_negative",
+          "columnName": "balance_observed",
+          "definition": "CHECK (((balance_observed IS NULL) OR (balance_observed >= (0)::numeric)))",
+          "expression": "balance_observed IS NULL) OR (balance_observed >= (0)"
+        },
+        {
           "name": "wt_currency_format",
           "columnName": "currency",
           "definition": "CHECK ((currency ~ '^[A-Z]{3}$'::text))",
@@ -670,7 +692,7 @@
         },
         {
           "name": "wt_reference_only_for_reversal",
-          "columnName": "reference_external_transaction_id",
+          "columnName": "kind",
           "definition": "CHECK (((kind = ANY (ARRAY['REFUND'::text, 'ROLLBACK'::text])) OR (reference_external_transaction_id IS NULL)))",
           "expression": "(kind = ANY (ARRAY['REFUND'::text, 'ROLLBACK'::text])) OR (reference_external_transaction_id IS NULL)"
         },

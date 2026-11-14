@@ -36,6 +36,7 @@ export class WagerTransactionRecord {
   failureCode!: string | null;
   createdAt!: Date;
   processedAt!: Date | null;
+  balanceObserved!: string | null;
 }
 
 export class WalletLedgerEntryRecord {
@@ -117,6 +118,7 @@ export const WagerTransactionSchema = new EntitySchema<WagerTransactionRecord>({
     failureCode: { type: 'string', fieldName: 'failure_code', nullable: true },
     createdAt: { type: 'Date', fieldName: 'created_at', columnType: 'timestamptz' },
     processedAt: { type: 'Date', fieldName: 'processed_at', columnType: 'timestamptz', nullable: true },
+    balanceObserved: { type: 'decimal', fieldName: 'balance_observed', columnType: 'numeric(19,2)', precision: 19, scale: 2, nullable: true },
   },
 });
 

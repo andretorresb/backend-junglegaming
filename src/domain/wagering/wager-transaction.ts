@@ -75,6 +75,7 @@ export interface WagerTransactionState {
   referenceTransactionId?: string | undefined;
   failureCode?: FailureCode | undefined;
   processedAt?: Date | undefined;
+  observedBalance?: MoneyProps | undefined;
 }
 
 export class WagerTransaction {
@@ -97,6 +98,7 @@ export class WagerTransaction {
   private _referenceTransactionId: string | undefined;
   private _failureCode: FailureCode | undefined;
   private _processedAt: Date | undefined;
+  private _observedBalance: Money | undefined;
 
   private constructor(state: {
     id: string;
@@ -116,6 +118,7 @@ export class WagerTransaction {
     referenceTransactionId: string | undefined;
     failureCode: FailureCode | undefined;
     processedAt: Date | undefined;
+    observedBalance: Money | undefined;
   }) {
     this.id = state.id;
     this.providerId = state.providerId;
@@ -134,6 +137,7 @@ export class WagerTransaction {
     this._referenceTransactionId = state.referenceTransactionId;
     this._failureCode = state.failureCode;
     this._processedAt = state.processedAt;
+    this._observedBalance = state.observedBalance;
   }
 
   /** Nasce em PENDING. Valida a exigência de referência por kind. */
@@ -160,6 +164,7 @@ export class WagerTransaction {
       referenceTransactionId: undefined,
       failureCode: undefined,
       processedAt: undefined,
+      observedBalance: undefined,
       status: WagerTransactionStatus.Pending,
     });
   }
@@ -184,6 +189,7 @@ export class WagerTransaction {
       referenceTransactionId: state.referenceTransactionId,
       failureCode: state.failureCode,
       processedAt: state.processedAt,
+      observedBalance: state.observedBalance === undefined ? undefined : Money.from(state.observedBalance),
     });
   }
 
@@ -203,13 +209,18 @@ export class WagerTransaction {
     return this._processedAt;
   }
 
+  /** Saldo da wallet no momento da decisão. Usado para replay idempotente. */
+  get observedBalance(): Money | undefined {
+    return this._observedBalance;
+  }
+
   // ---- transições ----------------------------------------------------------
 
   /**
    * `referenceTransactionId` é o id INTERNO da transação referenciada.
    * Obrigatório para REFUND/ROLLBACK; proibido para os demais kinds.
    */
-  markProcessed(referenceTransactionId: string | undefined, at: Date): void {
+  markProcessed(referenceTransactionId: string | undefined, at: Date, observedBalance?: Money): void {
     this.assertTransitionFrom([WagerTransactionStatus.Pending, WagerTransactionStatus.PendingReference], 'PROCESSED');
     const requiresReference = this.requiresReference();
     if (requiresReference && (referenceTransactionId === undefined || referenceTransactionId === '')) {
@@ -221,6 +232,7 @@ export class WagerTransaction {
     this._status = WagerTransactionStatus.Processed;
     this._referenceTransactionId = referenceTransactionId;
     this._processedAt = at;
+    this._observedBalance = observedBalance;
   }
 
   markPendingReference(): void {
@@ -232,10 +244,11 @@ export class WagerTransaction {
   }
 
   /** Rejeição por regra de negócio: resultado persistido, não exceção. */
-  reject(code: FailureCode): void {
+  reject(code: FailureCode, observedBalance?: Money): void {
     this.assertTransitionFrom([WagerTransactionStatus.Pending, WagerTransactionStatus.PendingReference], 'REJECTED');
     this._status = WagerTransactionStatus.Rejected;
     this._failureCode = code;
+    this._observedBalance = observedBalance;
   }
 
   /** Erro permanente de infraestrutura: terminal e auditável. */

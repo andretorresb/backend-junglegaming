@@ -81,6 +81,8 @@ export function wagerTransactionFromRecord(record: WagerTransactionRecord): Wage
     referenceTransactionId: record.referenceTransactionId ?? undefined,
     failureCode: (record.failureCode ?? undefined) as FailureCode | undefined,
     processedAt: record.processedAt ?? undefined,
+    observedBalance:
+      record.balanceObserved === null ? undefined : { amount: record.balanceObserved, currency: record.currency },
   });
 }
 
@@ -104,6 +106,7 @@ export function wagerTransactionToRecord(tx: WagerTransaction): WagerTransaction
     failureCode: tx.failureCode ?? null,
     createdAt: tx.createdAt,
     processedAt: tx.processedAt ?? null,
+    balanceObserved: tx.observedBalance?.toJSON().amount ?? null,
   };
 }
 

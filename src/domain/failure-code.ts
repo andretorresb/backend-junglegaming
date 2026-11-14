@@ -8,6 +8,7 @@ export enum FailureCode {
   InsufficientBalance = 'INSUFFICIENT_BALANCE',
   NegativeBalanceOnReversal = 'NEGATIVE_BALANCE_ON_REVERSAL',
   CurrencyMismatch = 'CURRENCY_MISMATCH',
+  PlayerMismatch = 'PLAYER_MISMATCH',
   ReferenceNotFound = 'REFERENCE_NOT_FOUND',
   ReferenceNotProcessed = 'REFERENCE_NOT_PROCESSED',
   ReferenceAlreadyReversed = 'REFERENCE_ALREADY_REVERSED',
