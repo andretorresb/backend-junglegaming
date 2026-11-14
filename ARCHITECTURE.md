@@ -48,7 +48,50 @@ Escopo: endpoints de health ficam abertos. Mensagens da fila são canal interno 
 - `GET /health/live`: processo vivo, sem IO, sem autenticação. **Implementado.**
 - `GET /health/ready`: Postgres e SQS alcançáveis. **Pendente (Etapa 6).**
 
-## 6. Pendências desta documentação
+## 6. Domínio (Etapa 1)
+
+### 6.1 Money
+- Representação interna: `decimal.js` (precisão 40, sem arredondamento silencioso).
+- Entrada aceita: `^-?\d+(\.\d{1,2})?$`. Rejeita `NaN`, `Infinity`, notação científica, vazio, sinal `+`, mais de 2 casas.
+- `Money.from` aceita negativos (uso interno); `Money.fromInput` rejeita negativos (contratos de entrada).
+- Serialização: sempre 2 casas (`"25.00"`). `-0` é normalizado para `0`.
+- `equals` com moedas diferentes retorna `false`; `isLessThan` e operações aritméticas lançam `CurrencyMismatchError`.
+
+### 6.2 Transições de `WagerTransaction`
+
+| De | Para |
+|---|---|
+| `PENDING` | `PROCESSED`, `PENDING_REFERENCE` (só REFUND/ROLLBACK), `REJECTED`, `FAILED` |
+| `PENDING_REFERENCE` | `PROCESSED`, `REJECTED`, `FAILED` |
+| `PROCESSED`, `REJECTED`, `FAILED` | nenhuma (terminais) |
+
+Transição inválida lança `InvalidTransactionStateError`, que é erro de programação e não caminho de negócio.
+
+### 6.3 Direção do lançamento (`ledgerDirectionFor`)
+
+| Kind | Direção | Referência aceita |
+|---|---|---|
+| `OPENING`, `WIN` | CREDIT | — |
+| `BET` | DEBIT | — |
+| `LOSS` | sem lançamento | — |
+| `REFUND` | CREDIT | somente `BET` |
+| `ROLLBACK` | inverso da referência: `BET` → CREDIT; `WIN` ou `REFUND` → DEBIT | `BET`, `WIN`, `REFUND` |
+
+A validação de tipo da referência fica nesse método (fonte única). A validação de contexto (provider, player, wallet, moeda, rodada), de status e de valor fica na Etapa 4.
+
+### 6.4 Hash de payload (`payloadHash`)
+1. Monta o subconjunto: `providerId, externalTransactionId, playerId, walletId, roundId, gameId, kind, money (MoneyProps), referenceExternalTransactionId` (ausente = `null`).
+2. Serializa como JSON canônico: chaves de objeto ordenadas recursivamente (ordem de código UTF-16), arrays preservam a ordem, sem espaços.
+3. SHA-256 do texto UTF-8, em hexadecimal minúsculo (64 caracteres).
+
+`Idempotency-Key` e metadados de transporte não entram no hash.
+
+### 6.5 Wallet
+- `version` começa em 1 e incrementa somente quando o saldo muda (`debit`/`credit` com valor positivo).
+- `debit` sem saldo lança `InsufficientBalanceError` antes de qualquer alteração.
+- Na Etapa 4, a reversão que faria saldo negativo será traduzida para `NEGATIVE_BALANCE_ON_REVERSAL` pela camada de aplicação.
+
+## 7. Pendências desta documentação
 
 Serão preenchidas nas etapas seguintes conforme o plano em `ETAPAS.md` e as specs em `docs/specs/`:
 - Estratégia de lock e idempotência (Etapa 3).
