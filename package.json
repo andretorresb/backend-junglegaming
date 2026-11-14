@@ -16,9 +16,9 @@
     "test:unit": "bun test test/unit",
     "test:integration": "bun test test/integration",
     "test:concurrency": "bun test test/concurrency",
-    "migration:create": "mikro-orm migration:create",
-    "migration:up": "mikro-orm migration:up",
-    "migration:down": "mikro-orm migration:down"
+    "migration:create": "MIKRO_ORM_CLI_CONFIG=mikro-orm.config.ts bun ./node_modules/@mikro-orm/cli/index.js migration:create",
+    "migration:up": "MIKRO_ORM_CLI_CONFIG=mikro-orm.config.ts bun ./node_modules/@mikro-orm/cli/index.js migration:up",
+    "migration:down": "MIKRO_ORM_CLI_CONFIG=mikro-orm.config.ts bun ./node_modules/@mikro-orm/cli/index.js migration:down"
   },
   "dependencies": {
     "@mikro-orm/core": "^6.4.0",
@@ -32,6 +32,7 @@
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
+    "@mikro-orm/cli": "^6.4.0",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   }

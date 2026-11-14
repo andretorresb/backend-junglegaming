@@ -16,6 +16,8 @@ export default defineConfig({
   dbName: env.database.name,
   entities: [],
   entitiesTs: ['src/**/*.entity.ts'],
+  // Etapa 0 não possui entidades; elas são introduzidas na Etapa 2.
+  discovery: { warnWhenNoEntities: false },
   extensions: [Migrator],
   migrations: {
     path: 'src/infrastructure/persistence/migrations',

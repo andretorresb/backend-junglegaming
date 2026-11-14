@@ -24,7 +24,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
     serviceName: source['SERVICE_NAME'] ?? 'wagering-processor',
     database: {
       host: source['DB_HOST'] ?? 'localhost',
-      port: parseIntEnv(source['DB_PORT'], 5432, 'DB_PORT'),
+      port: parseIntEnv(source['DB_PORT'], 5433, 'DB_PORT'),
       user: source['DB_USER'] ?? 'jungle',
       password: source['DB_PASSWORD'] ?? 'jungle',
       name: source['DB_NAME'] ?? 'junglegaming',

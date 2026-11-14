@@ -12,7 +12,7 @@ describe('loadEnv', () => {
   it('usa valores padrão de desenvolvimento', () => {
     const env = loadEnv({});
     expect(env.port).toBe(3000);
-    expect(env.database.port).toBe(5432);
+    expect(env.database.port).toBe(5433);
   });
 
   it('rejeita porta inválida', () => {
