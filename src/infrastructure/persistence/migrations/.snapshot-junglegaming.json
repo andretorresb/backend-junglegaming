@@ -507,7 +507,7 @@
           "autoincrement": false,
           "primary": false,
           "nullable": true,
-          "unique": false,
+          "unique": true,
           "length": null,
           "precision": null,
           "scale": null,
@@ -601,6 +601,38 @@
           "comment": null,
           "enumItems": [],
           "mappedType": "decimal"
+        },
+        "reference_attempts": {
+          "name": "reference_attempts",
+          "type": "int4",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": 32,
+          "scale": 0,
+          "default": "0",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "integer"
+        },
+        "reference_next_attempt_at": {
+          "name": "reference_next_attempt_at",
+          "type": "timestamptz(6)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": 6,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "datetime"
         }
       },
       "name": "wager_transactions",
@@ -625,6 +657,18 @@
           "keyName": "wt_idempotency_key_uq",
           "unique": true,
           "primary": false
+        },
+        {
+          "columnNames": [
+            "reference_next_attempt_at",
+            "id"
+          ],
+          "composite": true,
+          "constraint": false,
+          "keyName": "wt_pending_due_idx",
+          "unique": false,
+          "primary": false,
+          "expression": "CREATE INDEX wt_pending_due_idx ON public.wager_transactions USING btree (reference_next_attempt_at, id) WHERE (status = 'PENDING_REFERENCE'::text)"
         },
         {
           "columnNames": [
@@ -662,6 +706,17 @@
         },
         {
           "columnNames": [
+            "reference_transaction_id"
+          ],
+          "composite": false,
+          "constraint": false,
+          "keyName": "wt_single_processed_reversal_uq",
+          "unique": true,
+          "primary": false,
+          "expression": "CREATE UNIQUE INDEX wt_single_processed_reversal_uq ON public.wager_transactions USING btree (reference_transaction_id) WHERE ((kind = ANY (ARRAY['REFUND'::text, 'ROLLBACK'::text])) AND (status = 'PROCESSED'::text))"
+        },
+        {
+          "columnNames": [
             "wallet_id"
           ],
           "composite": false,
@@ -691,8 +746,20 @@
           "expression": "currency ~ '^[A-Z]{3}$'::text"
         },
         {
+          "name": "wt_pending_has_schedule",
+          "columnName": "reference_next_attempt_at",
+          "definition": "CHECK (((status <> 'PENDING_REFERENCE'::text) OR (reference_next_attempt_at IS NOT NULL)))",
+          "expression": "(status <> 'PENDING_REFERENCE'::text) OR (reference_next_attempt_at IS NOT NULL)"
+        },
+        {
+          "name": "wt_reference_attempts_non_negative",
+          "columnName": "reference_attempts",
+          "definition": "CHECK ((reference_attempts >= 0))",
+          "expression": "reference_attempts >= 0"
+        },
+        {
           "name": "wt_reference_only_for_reversal",
-          "columnName": "kind",
+          "columnName": "reference_external_transaction_id",
           "definition": "CHECK (((kind = ANY (ARRAY['REFUND'::text, 'ROLLBACK'::text])) OR (reference_external_transaction_id IS NULL)))",
           "expression": "(kind = ANY (ARRAY['REFUND'::text, 'ROLLBACK'::text])) OR (reference_external_transaction_id IS NULL)"
         },

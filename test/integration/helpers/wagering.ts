@@ -107,3 +107,17 @@ export function useCase(em: EntityManager, clock: Clock = fixedClock()): Process
 }
 
 export { computePayloadHash, Money };
+
+/** Relógio que o teste controla. Permite avançar o tempo entre ciclos do worker. */
+export function mutableClock(start: Date): Clock & { advance(ms: number): void; set(at: Date): void } {
+  let current = start;
+  return {
+    now: () => current,
+    advance(ms: number) {
+      current = new Date(current.getTime() + ms);
+    },
+    set(at: Date) {
+      current = at;
+    },
+  };
+}

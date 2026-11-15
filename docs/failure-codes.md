@@ -11,7 +11,7 @@ Os valores são contrato: não renomear sem versionar.
 | `NEGATIVE_BALANCE_ON_REVERSAL` | ROLLBACK/REFUND que reverteria um crédito e deixaria o saldo negativo. Situação operacional distinta de aposta sem saldo: exige análise | Escalar para operação. Não reenviar automaticamente |
 | `CURRENCY_MISMATCH` | Moeda da transação diferente da moeda da wallet | Corrigir o payload |
 | `PLAYER_MISMATCH` | `playerId` da transação diferente do dono da wallet | Corrigir o payload |
-| `REFERENCE_NOT_FOUND` | Referência não existe e o prazo de espera (tentativas ou TTL) se esgotou | Verificar se a transação original foi enviada. Pode reenviar a original e depois a reversão |
+| `REFERENCE_NOT_FOUND` | A referência não apareceu dentro do limite de tentativas ou do TTL. A reversão foi rejeitada após esperar (`PENDING_REFERENCE`, seção 10 do ARCHITECTURE.md) | Verificar se a transação original foi enviada. Pode reenviar a original e depois a reversão |
 | `REFERENCE_NOT_PROCESSED` | Referência existe mas não está `PROCESSED` (ex.: foi rejeitada) | Não reverter o que não foi aplicado |
 | `REFERENCE_ALREADY_REVERSED` | Referência já foi revertida pelo mesmo tipo de operação | Não reenviar. Já está revertida |
 | `REFERENCE_TYPE_NOT_ALLOWED` | Tipo da referência não permitido (REFUND só referencia BET; ROLLBACK referencia BET, WIN ou REFUND) | Corrigir o payload |

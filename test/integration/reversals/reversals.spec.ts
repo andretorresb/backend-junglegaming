@@ -121,11 +121,13 @@ describe('REFUND e ROLLBACK — matriz de regras', () => {
     expect(res.failureCode).toBe(FailureCode.ReferenceNotProcessed);
   });
 
-  it('REFUND com referência inexistente → REFERENCE_NOT_FOUND (a Etapa 5 troca por PENDING_REFERENCE)', async () => {
+  it('REFUND com referência inexistente → PENDING_REFERENCE, sem movimentar saldo', async () => {
     const w = await seedWallet(client, { balance: '100.00' });
     const res = await op(w, 'REFUND', '25.00', { referenceExternalTransactionId: 'nunca-existiu' });
-    expect(res.status).toBe(WagerTransactionStatus.Rejected);
-    expect(res.failureCode).toBe(FailureCode.ReferenceNotFound);
+    expect(res.status).toBe(WagerTransactionStatus.PendingReference);
+    expect(res.failureCode).toBeUndefined();
+    expect(await balanceOf(w.walletId)).toBe('100.00');
+    expect(await countRows(client, "SELECT id FROM wager_transactions WHERE wallet_id = $1 AND status = 'PENDING_REFERENCE'", [w.walletId])).toBe(1);
   });
 
   it('REFUND de BET de outro jogador → REFERENCE_CONTEXT_MISMATCH', async () => {

@@ -15,6 +15,8 @@ describe('HTTP — POST /wallets', () => {
   let base: string;
 
   beforeAll(async () => {
+    // Sem agendamento automático: o worker é exercitado diretamente nos testes de referência pendente.
+    process.env['PENDING_REFERENCE_POLL_MS'] = '0';
     const moduleRef = await Test.createTestingModule({
       imports: [MikroOrmModule.forRoot({ ...config, dbName: TEST_DB_NAME }), WagerModule],
     }).compile();

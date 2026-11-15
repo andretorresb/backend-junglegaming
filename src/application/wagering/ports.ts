@@ -25,6 +25,14 @@ export interface WagerRepositories {
   /** Reversão já processada que aponta para esta transação (REFUND ou ROLLBACK), se existir. */
   findProcessedReversalOf(referenceTransactionId: string): Promise<WagerTransaction | undefined>;
   insertTransaction(tx: WagerTransaction): Promise<void>;
+  /** Grava o estado atual de uma transação já existente (status, referência, agendamento). */
+  updateTransaction(tx: WagerTransaction): Promise<void>;
+  /**
+   * Reivindica uma transação PENDING_REFERENCE vencida, com SELECT ... FOR UPDATE SKIP LOCKED.
+   * Duas instâncias do worker nunca recebem a mesma linha. `excludedIds` são as que falharam
+   * neste ciclo, para não bloquearem o restante do lote.
+   */
+  claimDuePendingReference(now: Date, excludedIds: readonly string[]): Promise<WagerTransaction | undefined>;
   insertLedgerEntry(entry: WalletLedgerEntry): Promise<void>;
   enqueueOutbox(message: OutboxEnvelope): Promise<void>;
 }

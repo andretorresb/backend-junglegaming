@@ -92,7 +92,7 @@ describe('WagerTransaction — transições', () => {
 
   it('REFUND PENDING → PENDING_REFERENCE → PROCESSED com referência interna', () => {
     const tx = make({ kind: WagerTransactionKind.Refund, referenceExternalTransactionId: 'transaction-1' });
-    tx.markPendingReference();
+    tx.markPendingReference(now);
     expect(tx.status).toBe(WagerTransactionStatus.PendingReference);
     expect(tx.isTerminal()).toBe(false);
     tx.markProcessed('internal-bet-id', now);
@@ -102,13 +102,13 @@ describe('WagerTransaction — transições', () => {
 
   it('PENDING_REFERENCE → REJECTED (esgotamento de referência)', () => {
     const tx = make({ kind: WagerTransactionKind.Rollback, referenceExternalTransactionId: 'transaction-1' });
-    tx.markPendingReference();
+    tx.markPendingReference(now);
     tx.reject(FailureCode.ReferenceNotFound);
     expect(tx.failureCode).toBe(FailureCode.ReferenceNotFound);
   });
 
   it('apenas REFUND/ROLLBACK podem aguardar referência', () => {
-    expect(() => make().markPendingReference()).toThrow(InvalidTransactionStateError);
+    expect(() => make().markPendingReference(now)).toThrow(InvalidTransactionStateError);
   });
 
   it('markProcessed de REFUND exige referência; de BET a proíbe', () => {
@@ -139,8 +139,8 @@ describe('WagerTransaction — terminais não transicionam', () => {
 
   it('PENDING_REFERENCE não volta a PENDING_REFERENCE', () => {
     const tx = make({ kind: WagerTransactionKind.Refund, referenceExternalTransactionId: 'transaction-1' });
-    tx.markPendingReference();
-    expect(() => tx.markPendingReference()).toThrow(InvalidTransactionStateError);
+    tx.markPendingReference(now);
+    expect(() => tx.markPendingReference(now)).toThrow(InvalidTransactionStateError);
   });
 });
 

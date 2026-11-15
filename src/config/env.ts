@@ -16,6 +16,15 @@ export interface AppEnv {
     readonly endpoint: string;
     readonly region: string;
   };
+  readonly pendingReference: {
+    /** Intervalo entre ciclos do worker. 0 desliga o agendamento (usado nos testes). */
+    readonly pollMs: number;
+    readonly batchSize: number;
+    readonly maxAttempts: number;
+    readonly ttlMs: number;
+    readonly baseDelayMs: number;
+    readonly maxDelayMs: number;
+  };
 }
 
 export function loadEnv(source: Record<string, string | undefined> = process.env): AppEnv {
@@ -33,13 +42,22 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
       endpoint: source['AWS_ENDPOINT_URL'] ?? 'http://localhost:4566',
       region: source['AWS_REGION'] ?? 'us-east-1',
     },
+    pendingReference: {
+      pollMs: parseIntEnv(source['PENDING_REFERENCE_POLL_MS'], 1000, 'PENDING_REFERENCE_POLL_MS', 0),
+      batchSize: parseIntEnv(source['PENDING_REFERENCE_BATCH_SIZE'], 50, 'PENDING_REFERENCE_BATCH_SIZE'),
+      maxAttempts: parseIntEnv(source['PENDING_REFERENCE_MAX_ATTEMPTS'], 10, 'PENDING_REFERENCE_MAX_ATTEMPTS'),
+      ttlMs: parseIntEnv(source['PENDING_REFERENCE_TTL_MS'], 24 * 60 * 60 * 1000, 'PENDING_REFERENCE_TTL_MS'),
+      baseDelayMs: parseIntEnv(source['PENDING_REFERENCE_BASE_DELAY_MS'], 1000, 'PENDING_REFERENCE_BASE_DELAY_MS'),
+      maxDelayMs: parseIntEnv(source['PENDING_REFERENCE_MAX_DELAY_MS'], 300_000, 'PENDING_REFERENCE_MAX_DELAY_MS'),
+    },
   };
 }
 
-function parseIntEnv(raw: string | undefined, fallback: number, name: string): number {
+/** Inteiro positivo; `minimum` permite 0 quando faz sentido (ex.: desligar um intervalo). */
+function parseIntEnv(raw: string | undefined, fallback: number, name: string, minimum = 1): number {
   if (raw === undefined || raw === '') return fallback;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value <= 0) {
+  if (!Number.isInteger(value) || value < minimum) {
     throw new Error(`Variável de ambiente ${name} inválida: "${raw}"`);
   }
   return value;

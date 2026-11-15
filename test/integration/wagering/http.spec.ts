@@ -20,6 +20,8 @@ describe('HTTP — POST /wagering/transactions e consultas', () => {
   let base: string;
 
   beforeAll(async () => {
+    // Sem agendamento automático: o worker é exercitado diretamente nos testes de referência pendente.
+    process.env['PENDING_REFERENCE_POLL_MS'] = '0';
     const moduleRef = await Test.createTestingModule({
       imports: [MikroOrmModule.forRoot({ ...config, dbName: TEST_DB_NAME }), WagerModule],
     }).compile();
@@ -163,14 +165,14 @@ describe('HTTP — POST /wagering/transactions e consultas', () => {
     expect(res.body['code']).toBe('INTERNAL_ONLY_KIND');
   });
 
-  it('REFUND sem referência existente → 422 REFERENCE_NOT_FOUND', async () => {
+  it('REFUND sem referência ainda → 202 PENDING_REFERENCE (Etapa 5)', async () => {
     const w = await seedWallet(client, { balance: '1000.00' });
     const res = await post(
       betBody(w.walletId, w.playerId, { kind: 'REFUND', referenceExternalTransactionId: 'bet-missing' }),
       { 'idempotency-key': 'k-refund' },
     );
-    expect(res.status).toBe(422);
-    expect(res.body).toMatchObject({ status: 'REJECTED', failureCode: 'REFERENCE_NOT_FOUND' });
+    expect(res.status).toBe(202);
+    expect(res.body).toMatchObject({ status: 'PENDING_REFERENCE', failureCode: null });
   });
 
   it('REFUND sem referenceExternalTransactionId → 400', async () => {

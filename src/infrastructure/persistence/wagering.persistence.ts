@@ -79,6 +79,39 @@ export class MikroOrmWagerRepositories implements WagerRepositories {
     await this.em.insert(WagerTransactionRecord, wagerTransactionToRecord(tx));
   }
 
+  async updateTransaction(tx: WagerTransaction): Promise<void> {
+    const r = wagerTransactionToRecord(tx);
+    await this.em.nativeUpdate(
+      WagerTransactionRecord,
+      { id: tx.id },
+      {
+        status: r.status,
+        failureCode: r.failureCode,
+        processedAt: r.processedAt,
+        referenceTransactionId: r.referenceTransactionId,
+        balanceObserved: r.balanceObserved,
+        referenceAttempts: r.referenceAttempts,
+        referenceNextAttemptAt: r.referenceNextAttemptAt,
+      },
+    );
+  }
+
+  async claimDuePendingReference(now: Date, excludedIds: readonly string[]): Promise<WagerTransaction | undefined> {
+    const record = await this.em.findOne(
+      WagerTransactionRecord,
+      {
+        status: 'PENDING_REFERENCE',
+        referenceNextAttemptAt: { $lte: now },
+        ...(excludedIds.length > 0 ? { id: { $nin: [...excludedIds] } } : {}),
+      },
+      {
+        orderBy: { referenceNextAttemptAt: 'asc', id: 'asc' },
+        lockMode: LockMode.PESSIMISTIC_PARTIAL_WRITE,
+      },
+    );
+    return record ? wagerTransactionFromRecord(record) : undefined;
+  }
+
   async insertLedgerEntry(entry: WalletLedgerEntry): Promise<void> {
     await this.em.insert(WalletLedgerEntryRecord, ledgerEntryToRecord(entry));
   }

@@ -56,7 +56,8 @@ export class WagerController {
       correlationId: idempotencyKey,
     });
 
-    const status = result.status === 'REJECTED' ? 422 : 200;
+    // 200 processada · 202 aguardando referência (Etapa 5) · 422 rejeitada por regra de negócio
+    const status = result.status === 'REJECTED' ? 422 : result.status === 'PENDING_REFERENCE' ? 202 : 200;
     res.status(status);
     return {
       transactionId: result.transactionId,

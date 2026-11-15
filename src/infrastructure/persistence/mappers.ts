@@ -83,6 +83,8 @@ export function wagerTransactionFromRecord(record: WagerTransactionRecord): Wage
     processedAt: record.processedAt ?? undefined,
     observedBalance:
       record.balanceObserved === null ? undefined : { amount: record.balanceObserved, currency: record.currency },
+    referenceAttempts: record.referenceAttempts,
+    nextReferenceAttemptAt: record.referenceNextAttemptAt ?? undefined,
   });
 }
 
@@ -107,6 +109,8 @@ export function wagerTransactionToRecord(tx: WagerTransaction): WagerTransaction
     createdAt: tx.createdAt,
     processedAt: tx.processedAt ?? null,
     balanceObserved: tx.observedBalance?.toJSON().amount ?? null,
+    referenceAttempts: tx.referenceAttempts,
+    referenceNextAttemptAt: tx.nextReferenceAttemptAt ?? null,
   };
 }
 

@@ -1,17 +1,22 @@
 import { computePayloadHash } from '../../domain/wagering/payload-hash';
 import { FailureCode } from '../../domain/failure-code';
 import { InsufficientBalanceError, InvalidInvariantError } from '../../domain/errors';
-import { LedgerDirection } from '../../domain/ledger/ledger-direction';
 import { Money, type MoneyProps } from '../../domain/money/money';
 import { WalletLedgerEntry } from '../../domain/wallet/wallet-ledger-entry';
 import type { Wallet, WalletMovement } from '../../domain/wallet/wallet';
-import { validateReversalReference } from '../../domain/wagering/reversal-rules';
 import {
   WagerTransaction,
   WagerTransactionKind,
   WagerTransactionStatus,
 } from '../../domain/wagering/wager-transaction';
+import {
+  DEFAULT_REFERENCE_RETRY_POLICY,
+  nextAttemptDelayMs,
+  type ReferenceRetryPolicy,
+} from '../../domain/wagering/reference-retry-policy';
 import type { Clock } from '../ports/clock';
+import { applyReversal, isWaitingForReference, type ReversalContext } from './apply-reversal';
+import { createEnvelope } from './envelope';
 import {
   IdempotencyConflictError,
   InternalOnlyKindError,
@@ -20,7 +25,17 @@ import {
   WalletNotFoundError,
 } from './errors';
 import type { OutboxEnvelope, WagerRepositories, WagerUnitOfWork } from './ports';
-import { createEnvelope } from './envelope';
+
+/** Parâmetros de espera por referência e de jitter. Injetáveis para testes. */
+export interface ProcessWagerTransactionOptions {
+  retryPolicy: ReferenceRetryPolicy;
+  random: () => number;
+}
+
+const DEFAULT_OPTIONS: ProcessWagerTransactionOptions = {
+  retryPolicy: DEFAULT_REFERENCE_RETRY_POLICY,
+  random: Math.random,
+};
 
 export interface ProcessWagerTransactionCommand {
   idempotencyKey: string;
@@ -63,6 +78,7 @@ export class ProcessWagerTransaction {
     private readonly uow: WagerUnitOfWork,
     private readonly clock: Clock,
     private readonly nextId: () => string,
+    private readonly options: ProcessWagerTransactionOptions = DEFAULT_OPTIONS,
   ) {}
 
   async execute(command: ProcessWagerTransactionCommand): Promise<ProcessWagerTransactionResult> {
@@ -158,6 +174,29 @@ export class ProcessWagerTransaction {
       createdAt: now,
     });
 
+    // Reversão cuja referência ainda não existe (ou ainda aguarda a própria referência):
+    // fica PENDING_REFERENCE e é reprocessada pelo worker. Nada é movimentado agora.
+    if (isReversal(command.kind) && (reference === undefined || isWaitingForReference(reference))) {
+      tx.markPendingReference(this.nextAttemptAt(now));
+      await repos.insertTransaction(tx);
+      await repos.enqueueOutbox(
+        this.envelope(command, now, 'WagerTransactionPendingReference', tx.id, {
+          transactionId: tx.id,
+          providerId: tx.providerId,
+          referenceExternalTransactionId: command.referenceExternalTransactionId ?? null,
+          walletId: tx.walletId,
+          nextAttemptAt: tx.nextReferenceAttemptAt?.toISOString() ?? null,
+        }),
+      );
+      return {
+        transactionId: tx.id,
+        status: tx.status,
+        balance: wallet.balance.toJSON(),
+        failureCode: undefined,
+        idempotentReplay: false,
+      };
+    }
+
     const movement = applyRule(tx, wallet, now, { reference, alreadyReversed });
 
     await repos.insertTransaction(tx);
@@ -211,6 +250,11 @@ export class ProcessWagerTransaction {
     };
   }
 
+  /** Primeira consulta à referência: base do backoff com jitter. */
+  private nextAttemptAt(now: Date): Date {
+    return new Date(now.getTime() + nextAttemptDelayMs(0, this.options.retryPolicy, this.options.random()));
+  }
+
   private envelope(
     command: ProcessWagerTransactionCommand,
     occurredAt: Date,
@@ -220,11 +264,6 @@ export class ProcessWagerTransaction {
   ): OutboxEnvelope {
     return createEnvelope({ nextId: this.nextId, correlationId: command.correlationId, occurredAt, eventType, aggregateId, data });
   }
-}
-
-interface ReversalContext {
-  reference: WagerTransaction | undefined;
-  alreadyReversed: boolean;
 }
 
 /**
@@ -265,37 +304,6 @@ function applyRule(
 
     default:
       throw new InvalidInvariantError(`kind ${tx.kind} não tem regra de aplicação`);
-  }
-}
-
-function applyReversal(
-  tx: WagerTransaction,
-  wallet: Wallet,
-  now: Date,
-  { reference, alreadyReversed }: ReversalContext,
-): WalletMovement | undefined {
-  const rejection = validateReversalReference(tx, reference, alreadyReversed);
-  if (rejection !== undefined || reference === undefined) {
-    tx.reject(rejection ?? FailureCode.ReferenceNotFound, wallet.balance);
-    return undefined;
-  }
-
-  const direction = tx.ledgerDirectionFor(reference);
-  if (direction === LedgerDirection.Credit) {
-    const movement = wallet.credit(tx.money, now);
-    tx.markProcessed(reference.id, now, wallet.balance);
-    return movement;
-  }
-
-  // Reversão que debitaria: se o saldo não cobre, é rejeitada com código próprio (regra 9).
-  try {
-    const movement = wallet.debit(tx.money, now);
-    tx.markProcessed(reference.id, now, wallet.balance);
-    return movement;
-  } catch (error) {
-    if (!(error instanceof InsufficientBalanceError)) throw error;
-    tx.reject(FailureCode.NegativeBalanceOnReversal, wallet.balance);
-    return undefined;
   }
 }
 

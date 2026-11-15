@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 4 (wallets e reversões)**.
+Estado atual: **Etapa 5 (referências fora de ordem)**.
 
 ## 1. Stack
 
@@ -168,9 +168,8 @@ Se duas requisições com chaves diferentes e o mesmo `(provider, externalTransa
 - **Sem `Idempotency-Key`:** criar a wallet de novo com os mesmos dados já retorna 409, que é uma resposta determinística. Decidido não exigir header nesta etapa.
 - Saldo negativo: 400, antes de qualquer escrita.
 
-### 9.2 Referência ausente nesta etapa
-- REFUND ou ROLLBACK com referência inexistente é persistido como `REJECTED` com `REFERENCE_NOT_FOUND`.
-- A Etapa 5 troca este caso por `PENDING_REFERENCE`, com reprocessamento. O comportamento atual é provisório.
+### 9.2 Referência ausente
+- Resolvido na Etapa 5: ver seção 10. A reversão fica `PENDING_REFERENCE`, sem movimento de saldo, e o worker a reprocessa.
 
 ### 9.3 Regras de reversão (`src/domain/wagering/reversal-rules.ts`)
 Ordem de validação, na primeira falha:
@@ -196,7 +195,42 @@ A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da
 - `test/integration/wallets/`: criação de wallet, duplicata e atomicidade (falha na outbox desfaz tudo).
 - `test/concurrency/reversal-concurrency.spec.ts`: REFUND e ROLLBACK simultâneos, 20 REFUNDs paralelos, ROLLBACK de WIN com apostas concorrentes.
 
-## 10. Pendências desta documentação
+## 10. Referências fora de ordem (Etapa 5)
+
+### 10.1 Entrada
+- REFUND ou ROLLBACK cuja referência não existe, ou existe mas ainda está `PENDING_REFERENCE`, vira `PENDING_REFERENCE`.
+- A transação é persistida com `reference_attempts = 0` e `reference_next_attempt_at` (primeira consulta, com backoff e jitter). Evento `WagerTransactionPendingReference` na outbox, na mesma transação.
+- HTTP responde **202** com `status: PENDING_REFERENCE`.
+- Referência existente e não processada (ex.: `REJECTED`) continua sendo rejeitada na hora com `REFERENCE_NOT_PROCESSED`. Aguardar não resolveria esse caso.
+
+### 10.2 Worker (`PendingReferenceWorker`)
+- Cada transação vencida é processada em transação SQL própria:
+  1. reivindica a próxima com `SELECT ... FOR UPDATE SKIP LOCKED` (verificado no SQL gerado): duas instâncias nunca pegam a mesma linha;
+  2. trava a wallet, como o caminho HTTP e a fila;
+  3. se a referência apareceu, aplica a mesma regra de reversão do caso de uso (`apply-reversal.ts`). Uma única implementação;
+  4. se não apareceu, conta a tentativa e reagenda, ou expira.
+- Falha em um item (ex.: timeout de lock) faz rollback só dele. O item é excluído do restante do ciclo e volta no próximo.
+- O agendador (`PendingReferenceScheduler`) roda um ciclo por vez, em intervalo fixo. `PENDING_REFERENCE_POLL_MS=0` desliga o agendamento.
+
+### 10.3 Limites e backoff (`src/domain/wagering/reference-retry-policy.ts`)
+- Atraso: `min(teto, base × 2^tentativas) × (0,5 a 1,0)` (jitter). Padrões: base 1s, teto 5 min.
+- Limite de tentativas: 10. Com o backoff padrão, cobre cerca de 25 min.
+- TTL: 24h desde a chegada. Limita o tempo de vida de uma transação pendente mesmo que o worker fique parado.
+- Justificativa: a reversão costuma chegar em segundos ou minutos depois da aposta. As primeiras consultas são rápidas, as seguintes espaçam a carga. O TTL impede acúmulo indefinido.
+- Esgotado o limite ou o TTL: `REJECTED` com `REFERENCE_NOT_FOUND`, e evento `WagerTransactionRejected`.
+- Variáveis: `PENDING_REFERENCE_MAX_ATTEMPTS`, `PENDING_REFERENCE_TTL_MS`, `PENDING_REFERENCE_BASE_DELAY_MS`, `PENDING_REFERENCE_MAX_DELAY_MS`, `PENDING_REFERENCE_BATCH_SIZE`, `PENDING_REFERENCE_POLL_MS`.
+
+### 10.4 Decisões
+- **Espera encadeada:** um ROLLBACK de um REFUND pendente também aguarda. Sem isso, o ROLLBACK seria rejeitado como `REFERENCE_NOT_PROCESSED` antes de o REFUND chegar.
+- **Lock antes da reivindicação:** o worker reivindica a linha e depois trava a wallet, na mesma transação. A ordem é a mesma do caminho HTTP: nunca há ciclo de locks, porque o caminho HTTP não trava linhas de transações existentes.
+- **Logs sem valores:** cada tentativa gera um registro JSON com `transactionId`, `walletId`, `attempts`, `outcome` e `failureCode`. Nunca `amount` nem payload.
+
+### 10.5 Testes
+- `test/unit/domain/reference-retry-policy.spec.ts`: backoff, teto, jitter, limite e TTL.
+- `test/integration/wagering/pending-reference.spec.ts`: 10 casos, incluindo a cadeia ROLLBACK → REFUND → BET, referência que nunca chega, TTL, valor divergente, saldo gasto e falha transitória isolada.
+- `test/concurrency/pending-reference-concurrency.spec.ts`: 50 reversões pendentes drenadas por dois workers em paralelo, sem duplicidade.
+
+## 11. Pendências desta documentação
 
 Serão preenchidas nas etapas seguintes conforme o plano em `ETAPAS.md` e as specs em `docs/specs/`:
 - Estratégia de lock e idempotência (Etapa 3).

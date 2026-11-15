@@ -78,6 +78,8 @@ export interface WagerTransactionState {
   failureCode?: FailureCode | undefined;
   processedAt?: Date | undefined;
   observedBalance?: MoneyProps | undefined;
+  referenceAttempts?: number | undefined;
+  nextReferenceAttemptAt?: Date | undefined;
 }
 
 export class WagerTransaction {
@@ -101,6 +103,8 @@ export class WagerTransaction {
   private _failureCode: FailureCode | undefined;
   private _processedAt: Date | undefined;
   private _observedBalance: Money | undefined;
+  private _referenceAttempts: number;
+  private _nextReferenceAttemptAt: Date | undefined;
 
   private constructor(state: {
     id: string;
@@ -121,6 +125,8 @@ export class WagerTransaction {
     failureCode: FailureCode | undefined;
     processedAt: Date | undefined;
     observedBalance: Money | undefined;
+    referenceAttempts: number;
+    nextReferenceAttemptAt: Date | undefined;
   }) {
     this.id = state.id;
     this.providerId = state.providerId;
@@ -140,6 +146,8 @@ export class WagerTransaction {
     this._failureCode = state.failureCode;
     this._processedAt = state.processedAt;
     this._observedBalance = state.observedBalance;
+    this._referenceAttempts = state.referenceAttempts;
+    this._nextReferenceAttemptAt = state.nextReferenceAttemptAt;
   }
 
   /** Nasce em PENDING. Valida a exigência de referência por kind. */
@@ -167,6 +175,8 @@ export class WagerTransaction {
       failureCode: undefined,
       processedAt: undefined,
       observedBalance: undefined,
+      referenceAttempts: 0,
+      nextReferenceAttemptAt: undefined,
       status: WagerTransactionStatus.Pending,
     });
   }
@@ -192,6 +202,8 @@ export class WagerTransaction {
       failureCode: state.failureCode,
       processedAt: state.processedAt,
       observedBalance: state.observedBalance === undefined ? undefined : Money.from(state.observedBalance),
+      referenceAttempts: state.referenceAttempts ?? 0,
+      nextReferenceAttemptAt: state.nextReferenceAttemptAt,
     });
   }
 
@@ -216,6 +228,16 @@ export class WagerTransaction {
     return this._observedBalance;
   }
 
+  /** Quantas vezes a referência foi consultada sem sucesso. */
+  get referenceAttempts(): number {
+    return this._referenceAttempts;
+  }
+
+  /** Quando a transação pendente deve ser reprocessada. Só existe em PENDING_REFERENCE. */
+  get nextReferenceAttemptAt(): Date | undefined {
+    return this._nextReferenceAttemptAt;
+  }
+
   // ---- transições ----------------------------------------------------------
 
   /**
@@ -233,23 +255,46 @@ export class WagerTransaction {
       throw new InvalidTransactionStateError(`${this.kind} não referencia outra transação`);
     }
     this._status = WagerTransactionStatus.Processed;
+    this._nextReferenceAttemptAt = undefined;
     this._referenceTransactionId = effective;
     this._processedAt = at;
     this._observedBalance = observedBalance;
   }
 
-  markPendingReference(): void {
+  /** Aguarda a referência. `nextAttemptAt` é a primeira tentativa de reprocessamento. */
+  markPendingReference(nextAttemptAt: Date): void {
     this.assertTransitionFrom([WagerTransactionStatus.Pending], 'PENDING_REFERENCE');
     if (!this.requiresReference()) {
       throw new InvalidTransactionStateError(`${this.kind} não pode aguardar referência`);
     }
     this._status = WagerTransactionStatus.PendingReference;
+    this._referenceAttempts = 0;
+    this._nextReferenceAttemptAt = nextAttemptAt;
+  }
+
+  /** Registra uma consulta sem sucesso à referência. */
+  incrementReferenceAttempts(): void {
+    this.assertInPendingReference();
+    this._referenceAttempts += 1;
+  }
+
+  /** Agenda a próxima consulta. */
+  rescheduleReference(nextAttemptAt: Date): void {
+    this.assertInPendingReference();
+    this._nextReferenceAttemptAt = nextAttemptAt;
+  }
+
+  private assertInPendingReference(): void {
+    if (this._status !== WagerTransactionStatus.PendingReference) {
+      throw new InvalidTransactionStateError(`operação válida só em PENDING_REFERENCE (estado atual: ${this._status})`);
+    }
   }
 
   /** Rejeição por regra de negócio: resultado persistido, não exceção. */
   reject(code: FailureCode, observedBalance?: Money): void {
     this.assertTransitionFrom([WagerTransactionStatus.Pending, WagerTransactionStatus.PendingReference], 'REJECTED');
     this._status = WagerTransactionStatus.Rejected;
+    this._nextReferenceAttemptAt = undefined;
     this._failureCode = code;
     this._observedBalance = observedBalance;
   }
@@ -258,6 +303,7 @@ export class WagerTransaction {
   fail(code: FailureCode): void {
     this.assertTransitionFrom([WagerTransactionStatus.Pending, WagerTransactionStatus.PendingReference], 'FAILED');
     this._status = WagerTransactionStatus.Failed;
+    this._nextReferenceAttemptAt = undefined;
     this._failureCode = code;
   }
 
