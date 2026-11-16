@@ -149,6 +149,15 @@ export class WagerTransactionsConsumer {
   }
 
   private async handle(message: Message): Promise<void> {
+    const started = process.hrtime.bigint();
+    try {
+      await this.handleInner(message);
+    } finally {
+      this.deps.metrics.observe('processing_latency_seconds', elapsedSeconds(started), { source: 'sqs' });
+    }
+  }
+
+  private async handleInner(message: Message): Promise<void> {
     this.deps.metrics.increment('sqs_messages_received_total');
     const body = message.Body ?? '';
     const receipt = message.ReceiptHandle ?? '';
@@ -275,6 +284,10 @@ export class WagerTransactionsConsumer {
     this.dlqUrl ??= await queueUrl(this.deps.sqs, this.settings.dlqName);
     return this.dlqUrl;
   }
+}
+
+function elapsedSeconds(started: bigint): number {
+  return Number(process.hrtime.bigint() - started) / 1e9;
 }
 
 function errorMessage(error: unknown): string {

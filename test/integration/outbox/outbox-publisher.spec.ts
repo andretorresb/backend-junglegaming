@@ -10,7 +10,7 @@ import { createSqsClient } from '../../../src/infrastructure/messaging/sqs-clien
 import { ensureQueues, EVENTS_QUEUE } from '../../../src/infrastructure/messaging/queues';
 import { SqsEventPublisher } from '../../../src/infrastructure/messaging/sqs-event-publisher';
 import { MikroOrmOutboxUnitOfWork } from '../../../src/infrastructure/persistence/outbox.persistence';
-import { InMemoryMetrics } from '../../../src/infrastructure/observability/in-memory-metrics';
+import { MetricsRegistry } from '../../../src/infrastructure/observability/metrics-registry';
 import { OutboxPublisherWorker, OUTBOX_LAG_METRIC } from '../../../src/application/outbox/outbox-publisher.worker';
 import type { EventPublisher, OutboundEvent } from '../../../src/application/ports/event-publisher';
 import { loadEnv } from '../../../src/config/env';
@@ -47,7 +47,7 @@ describe('Outbox — escrita atômica e publicação no SQS', () => {
     sqs.destroy();
   });
 
-  function publisher(events: EventPublisher, clock: { now(): Date }, metrics = new InMemoryMetrics()) {
+  function publisher(events: EventPublisher, clock: { now(): Date }, metrics = new MetricsRegistry()) {
     return new OutboxPublisherWorker(new MikroOrmOutboxUnitOfWork(em), events, clock, metrics, silent, {
       retryPolicy: { baseDelayMs: 1000, maxDelayMs: 8000 },
     });
@@ -147,7 +147,7 @@ describe('Outbox — escrita atômica e publicação no SQS', () => {
     const w = await seedWallet(client, { balance: '100.00' });
     await useCase(em, clock).execute(command({ walletId: w.walletId, playerId: w.playerId, amount: '25.00', externalTransactionId: 'bet-lag' }));
 
-    const metrics = new InMemoryMetrics();
+    const metrics = new MetricsRegistry();
     clock.advance(30_000);
     await publisher({ publish: async () => { throw new Error('parado'); } }, clock, metrics).runCycle(10);
     expect(metrics.value(OUTBOX_LAG_METRIC)).toBeCloseTo(30, 0);

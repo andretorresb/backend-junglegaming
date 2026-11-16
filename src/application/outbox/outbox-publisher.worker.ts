@@ -85,6 +85,7 @@ export class OutboxPublisherWorker {
       message.scheduleRetry(now, this.options.retryPolicy);
       await repos.updateOutbox(message);
       this.metrics.increment(OUTBOX_PUBLISH_FAILED_METRIC);
+      this.metrics.increment('retries_total', { component: 'outbox' });
       this.logger.error('outbox_publish_failed', {
         messageId: message.id,
         eventType: message.eventType,

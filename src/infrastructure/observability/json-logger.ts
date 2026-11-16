@@ -38,7 +38,13 @@ export function redact(value: LogFields): LogFields {
   const out: LogFields = {};
   for (const [key, val] of Object.entries(value)) {
     if (REDACTED_KEYS.has(key)) continue;
-    out[key] = val !== null && typeof val === 'object' && !Array.isArray(val) ? redact(val as LogFields) : val;
+    out[key] = redactValue(val);
   }
   return out;
+}
+
+function redactValue(val: unknown): unknown {
+  if (Array.isArray(val)) return val.map(redactValue);
+  if (val !== null && typeof val === 'object') return redact(val as LogFields);
+  return val;
 }

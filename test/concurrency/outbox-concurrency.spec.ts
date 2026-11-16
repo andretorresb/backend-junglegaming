@@ -9,7 +9,7 @@ import { createSqsClient } from '../../src/infrastructure/messaging/sqs-client';
 import { ensureQueues, EVENTS_QUEUE } from '../../src/infrastructure/messaging/queues';
 import { SqsEventPublisher } from '../../src/infrastructure/messaging/sqs-event-publisher';
 import { MikroOrmOutboxUnitOfWork } from '../../src/infrastructure/persistence/outbox.persistence';
-import { InMemoryMetrics } from '../../src/infrastructure/observability/in-memory-metrics';
+import { MetricsRegistry } from '../../src/infrastructure/observability/metrics-registry';
 import { OutboxPublisherWorker } from '../../src/application/outbox/outbox-publisher.worker';
 import type { EventPublisher } from '../../src/application/ports/event-publisher';
 import { loadEnv } from '../../src/config/env';
@@ -44,7 +44,7 @@ describe('Concorrência — publishers sobre a mesma outbox', () => {
   });
 
   function publisherWith(events: EventPublisher, clock: { now(): Date }) {
-    return new OutboxPublisherWorker(new MikroOrmOutboxUnitOfWork(em), events, clock, new InMemoryMetrics(), silent, {
+    return new OutboxPublisherWorker(new MikroOrmOutboxUnitOfWork(em), events, clock, new MetricsRegistry(), silent, {
       retryPolicy: { baseDelayMs: 1000, maxDelayMs: 8000 },
     });
   }

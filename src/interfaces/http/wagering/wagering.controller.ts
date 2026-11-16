@@ -32,6 +32,7 @@ export class WagerController {
   @Post('wagering/transactions')
   async submit(
     @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-correlation-id') correlationId: string | undefined,
     @Body() dto: SubmitWagerTransactionDto,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -53,7 +54,8 @@ export class WagerController {
       kind: dto.kind,
       money: { amount: dto.money.amount, currency: dto.money.currency },
       referenceExternalTransactionId: dto.referenceExternalTransactionId,
-      correlationId: idempotencyKey,
+      // o interceptor garante o cabeçalho; a Idempotency-Key não é identificador de correlação
+      correlationId: correlationId ?? idempotencyKey,
     });
 
     // 200 processada · 202 aguardando referência (Etapa 5) · 422 rejeitada por regra de negócio

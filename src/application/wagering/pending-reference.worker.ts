@@ -12,6 +12,7 @@ import {
 } from '../../domain/wagering/reference-retry-policy';
 import { InvalidInvariantError } from '../../domain/errors';
 import type { Clock } from '../ports/clock';
+import type { Metrics } from '../ports/observability';
 import { applyReversal, isWaitingForReference } from './apply-reversal';
 import { balanceChangedEvent, eventContext, outcomeEvent } from './events';
 import type { EventContext } from '../../domain/events/integration-event';
@@ -20,6 +21,7 @@ import type { WagerRepositories, WagerUnitOfWork } from './ports';
 export interface PendingReferenceWorkerOptions {
   retryPolicy: ReferenceRetryPolicy;
   random: () => number;
+  metrics?: Metrics | undefined;
 }
 
 export interface PendingReferenceCycleStats {
@@ -169,6 +171,7 @@ export class PendingReferenceWorker {
     const delay = nextAttemptDelayMs(pending.referenceAttempts, this.options.retryPolicy, this.options.random());
     pending.rescheduleReference(new Date(now.getTime() + delay));
     await repos.updateTransaction(pending);
+    this.options.metrics?.increment('retries_total', { component: 'pending_reference' });
     this.logAttempt(pending, 'rescheduled');
     return 'rescheduled';
   }

@@ -9,7 +9,7 @@ import config from '../../../mikro-orm.config';
 import { WagerModule } from '../../../src/interfaces/http/wagering/wagering.module';
 import { METRICS } from '../../../src/interfaces/http/wagering/wagering.tokens';
 import { RECONCILIATION_DIVERGENCE_METRIC } from '../../../src/infrastructure/persistence/wallet.queries';
-import { InMemoryMetrics } from '../../../src/infrastructure/observability/in-memory-metrics';
+import { MetricsRegistry } from '../../../src/infrastructure/observability/metrics-registry';
 import { encodeCursor } from '../../../src/interfaces/http/wallets/cursor';
 import { createPgClient, TEST_DB_NAME, truncateAll } from '../helpers/database';
 import { assertLedgerInvariant, command, seedWallet, useCase } from '../helpers/wagering';
@@ -181,7 +181,7 @@ describe('HTTP — consultas de wallet, ledger e reconciliação', () => {
       await fillLedger(w, 2);
       // saldo armazenado adulterado por fora do domínio
       await client.query("UPDATE wallets SET balance = balance + 7 WHERE id = $1", [w.walletId]);
-      const metrics = app.get<InMemoryMetrics>(METRICS);
+      const metrics = app.get<MetricsRegistry>(METRICS);
       const before = metrics.value(RECONCILIATION_DIVERGENCE_METRIC);
 
       const res = await fetch(`${base}/wallets/${w.walletId}/reconciliation`, { method: 'POST' });

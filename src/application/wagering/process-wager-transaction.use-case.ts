@@ -15,6 +15,7 @@ import {
   type ReferenceRetryPolicy,
 } from '../../domain/wagering/reference-retry-policy';
 import type { Clock } from '../ports/clock';
+import type { Logger, Metrics } from '../ports/observability';
 import { InboxMessage } from '../../domain/inbox/inbox-message';
 import { InboxDuplicateError } from './errors';
 import { applyReversal, isWaitingForReference, type ReversalContext } from './apply-reversal';
@@ -33,7 +34,12 @@ import type { EventContext } from '../../domain/events/integration-event';
 export interface ProcessWagerTransactionOptions {
   retryPolicy: ReferenceRetryPolicy;
   random: () => number;
+  logger?: Logger | undefined;
+  metrics?: Metrics | undefined;
 }
+
+const NOOP_LOGGER: Logger = { info: () => undefined, error: () => undefined };
+const NOOP_METRICS: Metrics = { increment: () => undefined, set: () => undefined, observe: () => undefined };
 
 const DEFAULT_OPTIONS: ProcessWagerTransactionOptions = {
   retryPolicy: DEFAULT_REFERENCE_RETRY_POLICY,
@@ -91,6 +97,35 @@ export class ProcessWagerTransaction {
   ) {}
 
   async execute(command: ProcessWagerTransactionCommand, inbox?: InboxRequest): Promise<ProcessWagerTransactionResult> {
+    const result = await this.executeInner(command, inbox);
+    this.observe(command, result, inbox);
+    return result;
+  }
+
+  /** Métrica e log do desfecho. Nunca inclui valores monetários. */
+  private observe(command: ProcessWagerTransactionCommand, result: ProcessWagerTransactionResult, inbox: InboxRequest | undefined): void {
+    const metrics = this.options.metrics ?? NOOP_METRICS;
+    const logger = this.options.logger ?? NOOP_LOGGER;
+    // Replay não é transação nova: conta como duplicata, e não entra no total por status.
+    if (result.idempotentReplay) {
+      metrics.increment('duplicates_detected_total', { source: inbox ? 'sqs' : 'http' });
+    } else {
+      metrics.increment('wagering_transactions_total', { kind: command.kind, status: result.status });
+    }
+    logger.info('transaction_decided', {
+      correlationId: command.correlationId,
+      messageId: inbox?.messageId ?? null,
+      transactionId: result.transactionId,
+      providerId: command.providerId,
+      walletId: command.walletId,
+      kind: command.kind,
+      status: result.status,
+      failureCode: result.failureCode ?? null,
+      idempotentReplay: result.idempotentReplay,
+    });
+  }
+
+  private async executeInner(command: ProcessWagerTransactionCommand, inbox?: InboxRequest): Promise<ProcessWagerTransactionResult> {
     if (command.kind === WagerTransactionKind.Opening) throw new InternalOnlyKindError();
     const money = Money.fromInput(command.money);
     const payloadHash = computePayloadHash({

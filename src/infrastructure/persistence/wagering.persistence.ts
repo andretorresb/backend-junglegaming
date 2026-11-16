@@ -1,5 +1,6 @@
 import { EntityManager, LockMode } from '@mikro-orm/core';
 import type { WagerRepositories, WagerUnitOfWork } from '../../application/wagering/ports';
+import type { Metrics } from '../../application/ports/observability';
 import type { IntegrationEvent } from '../../domain/events/integration-event';
 import { OutboxMessage } from '../../domain/outbox/outbox-message';
 import { outboxToRecord } from './mappers';
@@ -151,7 +152,10 @@ export class MikroOrmWagerRepositories implements WagerRepositories {
   }}
 
 export class MikroOrmWagerUnitOfWork implements WagerUnitOfWork {
-  constructor(private readonly em: EntityManager) {}
+  constructor(
+    private readonly em: EntityManager,
+    private readonly metrics: Metrics = { increment: () => undefined, set: () => undefined, observe: () => undefined },
+  ) {}
 
   async run<T>(work: (repos: WagerRepositories) => Promise<T>): Promise<T> {
     try {
@@ -164,7 +168,11 @@ export class MikroOrmWagerUnitOfWork implements WagerUnitOfWork {
         return work(new MikroOrmWagerRepositories(tem));
       });
     } catch (error) {
-      throw translateInfrastructureError(error);
+      const translated = translateInfrastructureError(error);
+      if (translated instanceof TransientInfrastructureError && /\b(55P03|40P01)\b/.test(translated.message)) {
+        this.metrics.increment('lock_conflicts_total');
+      }
+      throw translated;
     }
   }
 }

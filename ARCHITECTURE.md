@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 8 (consumidor SQS)**.
+Estado atual: **Etapa 9 (observabilidade)**.
 
 ## 1. Stack
 
@@ -338,7 +338,45 @@ A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da
 - `test/concurrency/consumer-concurrency.spec.ts`: três consumidores, seis wallets, 60 mensagens com duplicatas. Cada efeito acontece uma vez, e a invariante fecha em cada wallet.
 - `test/setup.ts` (preload do `bun test`): desliga os agendadores automáticos. Quem precisa de um consumidor cria o seu.
 
-## 11. Pendências desta documentação
+## 14. Observabilidade (Etapa 9)
+
+### 14.1 Logs estruturados
+- Uma linha JSON por evento, em stdout: `{ level, time, service, event, ... }`. Os logs do próprio Nest também saem nesse formato (`JsonNestLogger`).
+- Campos de correlação: `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId`, quando disponíveis.
+- **Correlação:** o interceptor HTTP aceita `x-correlation-id` (ou gera um UUID), devolve o valor na resposta e o propaga para o caso de uso e para os eventos (`correlationId` do envelope). Um valor com caracteres inválidos é substituído.
+- **Sem dados sensíveis:** `JsonLogger` remove recursivamente as chaves `amount`, `money`, `balance`, `balanceBefore`, `balanceAfter`, `payload`, `body` e `authorization`. Testado, inclusive dentro de arrays, e com um teste de integração que verifica o valor e o payload de uma requisição real.
+- Eventos principais: `http_request` (método, rota, status, duração), `transaction_decided`, `message_processed`, `message_duplicate`, `message_retry`, `message_dead_lettered`, `pending_reference_attempt`, `outbox_publish_failed`, `reconciliation_divergence`.
+
+### 14.2 Métricas
+Expostas em `GET /metrics` (formato texto do Prometheus 0.0.4). A implementação é própria (`MetricsRegistry`), sem dependência externa.
+
+| Métrica | Tipo | Labels | Significado |
+|---|---|---|---|
+| `wagering_transactions_total` | counter | `kind`, `status` | transações decididas (replay não entra) |
+| `duplicates_detected_total` | counter | `source` (http, sqs) | replays e entregas repetidas da inbox |
+| `retries_total` | counter | `component` (sqs, outbox, pending_reference) | tentativas repetidas |
+| `dlq_messages_total` | counter | — | mensagens enviadas à DLQ |
+| `lock_conflicts_total` | counter | — | esperas de lock que estouraram o timeout ou deadlock |
+| `outbox_lag_seconds` | gauge | — | idade da mensagem pendente mais antiga da outbox |
+| `outbox_published_total` / `outbox_publish_failed_total` | counter | `eventType` / — | publicação de eventos |
+| `processing_latency_seconds` | histogram | `source` (http, sqs), `route` (http) | latência de processamento |
+| `reconciliation_divergence_total` | counter | — | divergências de reconciliação |
+| `sqs_messages_received_total` / `sqs_messages_acked_total` | counter | — | fluxo da fila |
+
+- As séries obrigatórias são declaradas com valor zero no startup (`preregisterMetrics`), para que painéis e alertas tenham dado desde o primeiro scrape.
+- Testado: a métrica de lock aumenta quando uma wallet fica travada e a requisição responde 503.
+
+### 14.3 Health
+- `/health/live` e `/health/ready` separados (seção 6 deste documento). O `ready` inclui PostgreSQL, SQS e o check `draining` (shutdown).
+
+### 14.4 OpenTelemetry
+- Opcional no enunciado. Não implementado. As portas `Logger` e `Metrics` permitem trocar a implementação sem tocar na aplicação.
+
+### 14.5 Testes
+- `test/unit/observability.spec.ts`: formato Prometheus (contador, gauge, histograma, escape), redação recursiva, formato dos loggers.
+- `test/integration/observability/`: `/metrics` após atividade real, lock, correlação ponta a ponta e ausência de valores nos logs.
+
+## 12. Pendências desta documentação
 
 Serão preenchidas nas etapas seguintes conforme o plano em `ETAPAS.md` e as specs em `docs/specs/`:
 - Estratégia de lock e idempotência (Etapa 3).

@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { SQSClient } from '@aws-sdk/client-sqs';
 import { Logger, Module, ValidationPipe } from '@nestjs/common';
-import { APP_FILTER, APP_PIPE } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
+import { MetricsController } from '../observability/metrics.controller';
+import { HttpObservabilityInterceptor } from '../observability/http-observability.interceptor';
+import { MetricsRegistry } from '../../../infrastructure/observability/metrics-registry';
+import { preregisterMetrics } from '../../../infrastructure/observability/preregister';
 import { EntityManager } from '@mikro-orm/core';
 import { ProcessWagerTransaction } from '../../../application/wagering/process-wager-transaction.use-case';
 import { PendingReferenceWorker, type WorkerLogEntry } from '../../../application/wagering/pending-reference.worker';
@@ -12,7 +16,6 @@ import { MikroOrmWagerUnitOfWork } from '../../../infrastructure/persistence/wag
 import { WagerTransactionQueries } from '../../../infrastructure/persistence/wagering.queries';
 import { WalletQueries } from '../../../infrastructure/persistence/wallet.queries';
 import { JsonLogger } from '../../../infrastructure/observability/json-logger';
-import { InMemoryMetrics } from '../../../infrastructure/observability/in-memory-metrics';
 import { SystemClock } from '../../../infrastructure/time/system-clock';
 import type { ReferenceRetryPolicy } from '../../../domain/wagering/reference-retry-policy';
 import { PendingReferenceScheduler } from '../../workers/pending-reference.scheduler';
@@ -61,7 +64,7 @@ const logWorker = (entry: WorkerLogEntry): void => {
 };
 
 @Module({
-  controllers: [WagerController, WalletController],
+  controllers: [WagerController, WalletController, MetricsController],
   exports: [SQS_CLIENT, CONSUMER_LIFECYCLE],
   providers: [
     { provide: CLOCK, useFactory: (): Clock => new SystemClock() },
@@ -70,7 +73,7 @@ const logWorker = (entry: WorkerLogEntry): void => {
     {
       provide: WAGER_CONSUMER,
       inject: [SQS_CLIENT, PROCESS_WAGER_TRANSACTION, LOGGER, METRICS, CONSUMER_LIFECYCLE],
-      useFactory: (sqs: SQSClient, useCase: ProcessWagerTransaction, logger: JsonLogger, metrics: InMemoryMetrics, lifecycle: ConsumerLifecycle) => {
+      useFactory: (sqs: SQSClient, useCase: ProcessWagerTransaction, logger: JsonLogger, metrics: MetricsRegistry, lifecycle: ConsumerLifecycle) => {
         const c = loadEnv().consumer;
         return new WagerTransactionsConsumer(
           { sqs, useCase, logger, metrics, lifecycle },
@@ -92,20 +95,23 @@ const logWorker = (entry: WorkerLogEntry): void => {
     { provide: RETRY_POLICY, useFactory: retryPolicyFromEnv },
     {
       provide: PROCESS_WAGER_TRANSACTION,
-      inject: [EntityManager, CLOCK, RETRY_POLICY],
-      useFactory: (em: EntityManager, clock: Clock, retryPolicy: ReferenceRetryPolicy) =>
-        new ProcessWagerTransaction(new MikroOrmWagerUnitOfWork(em), clock, randomUUID, {
+      inject: [EntityManager, CLOCK, RETRY_POLICY, LOGGER, METRICS],
+      useFactory: (em: EntityManager, clock: Clock, retryPolicy: ReferenceRetryPolicy, logger: JsonLogger, metrics: MetricsRegistry) =>
+        new ProcessWagerTransaction(new MikroOrmWagerUnitOfWork(em, metrics), clock, randomUUID, {
           retryPolicy,
           random: Math.random,
+          logger,
+          metrics,
         }),
     },
     {
       provide: PENDING_REFERENCE_WORKER,
-      inject: [EntityManager, CLOCK, RETRY_POLICY],
-      useFactory: (em: EntityManager, clock: Clock, retryPolicy: ReferenceRetryPolicy) =>
-        new PendingReferenceWorker(new MikroOrmWagerUnitOfWork(em), clock, randomUUID, {
+      inject: [EntityManager, CLOCK, RETRY_POLICY, METRICS],
+      useFactory: (em: EntityManager, clock: Clock, retryPolicy: ReferenceRetryPolicy, metrics: MetricsRegistry) =>
+        new PendingReferenceWorker(new MikroOrmWagerUnitOfWork(em, metrics), clock, randomUUID, {
           retryPolicy,
           random: Math.random,
+          metrics,
         }, logWorker),
     },
     {
@@ -120,7 +126,7 @@ const logWorker = (entry: WorkerLogEntry): void => {
     {
       provide: OUTBOX_PUBLISHER,
       inject: [EntityManager, EVENT_PUBLISHER, CLOCK, METRICS, LOGGER],
-      useFactory: (em: EntityManager, publisher: SqsEventPublisher, clock: Clock, metrics: InMemoryMetrics, logger: JsonLogger) => {
+      useFactory: (em: EntityManager, publisher: SqsEventPublisher, clock: Clock, metrics: MetricsRegistry, logger: JsonLogger) => {
         const env = loadEnv();
         return new OutboxPublisherWorker(new MikroOrmOutboxUnitOfWork(em), publisher, clock, metrics, logger, {
           retryPolicy: { baseDelayMs: 1000, maxDelayMs: env.outbox.maxBackoffMs },
@@ -137,8 +143,8 @@ const logWorker = (entry: WorkerLogEntry): void => {
     OutboxPublisherScheduler,
     {
       provide: OPEN_WALLET,
-      inject: [EntityManager, CLOCK],
-      useFactory: (em: EntityManager, clock: Clock) => new OpenWallet(new MikroOrmWagerUnitOfWork(em), clock, randomUUID),
+      inject: [EntityManager, CLOCK, METRICS],
+      useFactory: (em: EntityManager, clock: Clock, metrics: MetricsRegistry) => new OpenWallet(new MikroOrmWagerUnitOfWork(em, metrics), clock, randomUUID),
     },
     {
       provide: WAGER_TRANSACTION_QUERIES,
@@ -146,11 +152,12 @@ const logWorker = (entry: WorkerLogEntry): void => {
       useFactory: (em: EntityManager) => new WagerTransactionQueries(em),
     },
     { provide: LOGGER, useFactory: () => new JsonLogger(loadEnv().serviceName) },
-    { provide: METRICS, useFactory: () => new InMemoryMetrics() },
+    { provide: METRICS, useFactory: () => preregisterMetrics(new MetricsRegistry()) },
+    { provide: APP_INTERCEPTOR, useClass: HttpObservabilityInterceptor },
     {
       provide: WALLET_QUERIES,
       inject: [EntityManager, METRICS, LOGGER],
-      useFactory: (em: EntityManager, metrics: InMemoryMetrics, logger: JsonLogger) => new WalletQueries(em, metrics, logger),
+      useFactory: (em: EntityManager, metrics: MetricsRegistry, logger: JsonLogger) => new WalletQueries(em, metrics, logger),
     },
     { provide: APP_FILTER, useClass: ApplicationErrorFilter },
     {

@@ -12,7 +12,7 @@ import { ensureQueues, queueUrl, WAGER_DLQ, WAGER_QUEUE } from '../../src/infras
 import { WagerTransactionsConsumer } from '../../src/interfaces/messaging/sqs/wager-transactions.consumer';
 import { ProcessWagerTransaction } from '../../src/application/wagering/process-wager-transaction.use-case';
 import { MikroOrmWagerUnitOfWork } from '../../src/infrastructure/persistence/wagering.persistence';
-import { InMemoryMetrics } from '../../src/infrastructure/observability/in-memory-metrics';
+import { MetricsRegistry } from '../../src/infrastructure/observability/metrics-registry';
 import { loadEnv } from '../../src/config/env';
 
 const silent = { info: () => undefined, error: () => undefined };
@@ -63,7 +63,7 @@ describe('Concorrência — consumidor SQS com várias instâncias', () => {
   const body = (messageId: string, data: Record<string, unknown>) =>
     JSON.stringify({ messageId, type: 'WagerTransactionRequested', occurredAt: new Date().toISOString(), data });
 
-  function makeConsumer(metrics: InMemoryMetrics) {
+  function makeConsumer(metrics: MetricsRegistry) {
     return new WagerTransactionsConsumer(
       {
         sqs,
@@ -108,7 +108,7 @@ describe('Concorrência — consumidor SQS com várias instâncias', () => {
       }
     }
 
-    const metrics = [new InMemoryMetrics(), new InMemoryMetrics(), new InMemoryMetrics()];
+    const metrics = [new MetricsRegistry(), new MetricsRegistry(), new MetricsRegistry()];
     const consumers = metrics.map(makeConsumer);
     const deadline = Date.now() + 90_000;
     let drained = false;

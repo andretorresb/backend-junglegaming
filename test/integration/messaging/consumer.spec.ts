@@ -11,7 +11,7 @@ import { createSqsClient } from '../../../src/infrastructure/messaging/sqs-clien
 import { ensureQueues, queueUrl, WAGER_DLQ, WAGER_QUEUE } from '../../../src/infrastructure/messaging/queues';
 import { WagerTransactionsConsumer, type WagerConsumerSettings } from '../../../src/interfaces/messaging/sqs/wager-transactions.consumer';
 import type { ConsumerLifecycle } from '../../../src/interfaces/messaging/sqs/lifecycle';
-import { InMemoryMetrics } from '../../../src/infrastructure/observability/in-memory-metrics';
+import { MetricsRegistry } from '../../../src/infrastructure/observability/metrics-registry';
 import { loadEnv } from '../../../src/config/env';
 import { TransientInfrastructureError } from '../../../src/application/wagering/errors';
 import type { ProcessWagerTransaction } from '../../../src/application/wagering/process-wager-transaction.use-case';
@@ -48,7 +48,7 @@ describe('Consumidor SQS — wager-transactions.fifo', () => {
   let client: Client;
   let em: EntityManager;
   let sqs: SQSClient;
-  let metrics: InMemoryMetrics;
+  let metrics: MetricsRegistry;
   const lifecycle: ConsumerLifecycle = { draining: false };
 
   beforeAll(async () => {
@@ -64,7 +64,7 @@ describe('Consumidor SQS — wager-transactions.fifo', () => {
     await truncateAll(client);
     await drainQueue(sqs, WAGER_QUEUE);
     await drainQueue(sqs, WAGER_DLQ);
-    metrics = new InMemoryMetrics();
+    metrics = new MetricsRegistry();
     lifecycle.draining = false;
   });
 
