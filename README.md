@@ -39,6 +39,8 @@ curl -s http://localhost:3000/health/live
 | `bun run migration:reset` | Reverte todas as migrations |
 | `bun run migration:status` | Lista migrations executadas e pendentes |
 | `bun run localstack:init` | Cria as filas no LocalStack (`wager-transactions.fifo`, DLQ e `wager-events`) |
+| `bun run test:unit` | Testes unitários (domínio, política, observabilidade). Não exige infraestrutura |
+| `bun run test:concurrency` | Concorrência e processos reais (exige PostgreSQL e LocalStack com as filas criadas) |
 | `bun run test:integration` | Testes de schema e mapeamento (exige Postgres; usa o banco `junglegaming_test`) |
 
 ## Documentação

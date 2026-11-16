@@ -36,6 +36,8 @@ export interface WagerConsumerSettings {
   retryMaxSeconds: number;
   /** Tempo para concluir mensagens em andamento no shutdown. */
   shutdownGraceMs: number;
+  /** Visibilidade ao receber. Define quanto tempo uma mensagem em andamento fica oculta para outros. */
+  visibilitySeconds?: number | undefined;
 }
 
 export interface WagerConsumerHooks {
@@ -112,7 +114,7 @@ export class WagerTransactionsConsumer {
         QueueUrl: url,
         MaxNumberOfMessages: this.settings.maxMessages,
         WaitTimeSeconds: this.settings.waitSeconds,
-        VisibilityTimeout: 60,
+        VisibilityTimeout: this.settings.visibilitySeconds ?? 60,
         MessageSystemAttributeNames: ['ApproximateReceiveCount'],
       }),
     );

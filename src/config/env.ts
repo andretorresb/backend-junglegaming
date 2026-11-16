@@ -28,6 +28,11 @@ export interface AppEnv {
     readonly retryBaseSeconds: number;
     readonly retryMaxSeconds: number;
     readonly shutdownGraceMs: number;
+    readonly visibilitySeconds: number;
+  };
+  /** Falhas injetadas para teste de recuperação. Desligadas por padrão; nunca ativas em produção. */
+  readonly faults: {
+    readonly crashAfterCommit: boolean;
   };
   readonly outbox: {
     /** Intervalo entre ciclos do publisher. 0 desliga o agendamento. */
@@ -74,6 +79,10 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
       retryBaseSeconds: parseIntEnv(source['SQS_RETRY_BASE_SECONDS'], 5, 'SQS_RETRY_BASE_SECONDS'),
       retryMaxSeconds: parseIntEnv(source['SQS_RETRY_MAX_SECONDS'], 900, 'SQS_RETRY_MAX_SECONDS'),
       shutdownGraceMs: parseIntEnv(source['SHUTDOWN_GRACE_MS'], 10_000, 'SHUTDOWN_GRACE_MS', 0),
+      visibilitySeconds: parseIntEnv(source['SQS_VISIBILITY_SECONDS'], 60, 'SQS_VISIBILITY_SECONDS'),
+    },
+    faults: {
+      crashAfterCommit: source['FAULT_CRASH_AFTER_COMMIT'] === '1',
     },
     outbox: {
       pollMs: parseIntEnv(source['OUTBOX_POLL_MS'], 500, 'OUTBOX_POLL_MS', 0),

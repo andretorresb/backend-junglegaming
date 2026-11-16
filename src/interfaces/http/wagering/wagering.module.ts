@@ -74,9 +74,12 @@ const logWorker = (entry: WorkerLogEntry): void => {
       provide: WAGER_CONSUMER,
       inject: [SQS_CLIENT, PROCESS_WAGER_TRANSACTION, LOGGER, METRICS, CONSUMER_LIFECYCLE],
       useFactory: (sqs: SQSClient, useCase: ProcessWagerTransaction, logger: JsonLogger, metrics: MetricsRegistry, lifecycle: ConsumerLifecycle) => {
-        const c = loadEnv().consumer;
+        const env = loadEnv();
+        const c = env.consumer;
+        // Falha injetada (teste): processo morre entre o commit e o ack. Desligada por padrão.
+        const hooks = env.faults.crashAfterCommit ? { afterCommit: () => process.exit(137) } : undefined;
         return new WagerTransactionsConsumer(
-          { sqs, useCase, logger, metrics, lifecycle },
+          { sqs, useCase, logger, metrics, lifecycle, hooks },
           {
             queueName: c.queueName,
             dlqName: c.dlqName,
@@ -86,6 +89,7 @@ const logWorker = (entry: WorkerLogEntry): void => {
             retryBaseSeconds: c.retryBaseSeconds,
             retryMaxSeconds: c.retryMaxSeconds,
             shutdownGraceMs: c.shutdownGraceMs,
+            visibilitySeconds: c.visibilitySeconds,
           },
         );
       },

@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 9 (observabilidade)**.
+Estado atual: **Etapa 10 (testes de integração e concorrência)**.
 
 ## 1. Stack
 
@@ -375,6 +375,52 @@ Expostas em `GET /metrics` (formato texto do Prometheus 0.0.4). A implementaçã
 ### 14.5 Testes
 - `test/unit/observability.spec.ts`: formato Prometheus (contador, gauge, histograma, escape), redação recursiva, formato dos loggers.
 - `test/integration/observability/`: `/metrics` após atividade real, lock, correlação ponta a ponta e ausência de valores nos logs.
+
+## 15. Testes (Etapa 10)
+
+### 15.1 Cobertura da seção 13 do enunciado
+
+**Integração** (PostgreSQL e LocalStack reais)
+
+| Item | Onde está |
+|---|---|
+| migrations e constraints | `test/integration/schema/` |
+| atomicidade entre wallet, ledger, inbox e outbox | `test/integration/atomicity/`: falha forçada em cada operação do commit; nada fica pela metade |
+| inbox e redelivery | `test/integration/messaging/consumer.spec.ts` |
+| publishers concorrentes sobre a mesma outbox | `test/concurrency/outbox-concurrency.spec.ts` |
+| retry e DLQ | `test/integration/messaging/consumer.spec.ts` (transitório até a DLQ); `test/integration/wagering/pending-reference.spec.ts` (esgotamento) |
+| recuperação após reinicialização | `test/integration/recovery/recovery.spec.ts` (reinício com pendências) |
+
+**Concorrência** (paralelismo real)
+
+| # | Cenário | Onde está |
+|---|---|---|
+| 1 | mesma aposta 50× em paralelo → um débito | `wagering-concurrency.spec.ts` (no mesmo processo); `multi-process.spec.ts` (50 requisições em 3 processos) |
+| 2 | disputa de saldo (80 + 80 sobre 100) | `wagering-concurrency.spec.ts`; 30 × 5 sobre 100 entre 3 processos em `multi-process.spec.ts` |
+| 3 | wallets distintas em paralelo | `wagering-concurrency.spec.ts`; `multi-process.spec.ts` |
+| 4 | ≥ 3 processos simultâneos | `multi-process.spec.ts`: três `bun src/main.ts` com pools próprios |
+| 5 | worker morto depois do commit e antes do ack | `recovery.spec.ts`: processo morre com código 137 entre o commit e o ack; o sobrevivente confirma sem duplicar |
+| 6 | dois publishers sobre a mesma outbox | `outbox-concurrency.spec.ts` |
+| 7 | ROLLBACK ou REFUND antes da referência | `pending-reference.spec.ts` e `pending-reference-concurrency.spec.ts` |
+| 8 | reinício com verificação de consistência final | `recovery.spec.ts`: SIGTERM, reinício, reconciliação consistente e saldo esperado |
+
+Invariante final: `assertLedgerInvariant` (saldo == soma do ledger) roda ao fim de cada teste que altera saldo.
+
+### 15.2 Infraestrutura de teste
+- `test/setup.ts` (preload do `bun test`, em `bunfig.toml`): desliga os agendadores automáticos. Quem precisa de worker, publisher ou consumidor cria o seu.
+- `test/support/app-process.ts`: sobe a aplicação como processo separado, espera o `live` e expõe o código de saída.
+- **Falha injetada:** `FAULT_CRASH_AFTER_COMMIT=1` faz o processo sair com código 137 entre o commit e o ack. Desligada por padrão. Não é usada em produção.
+- `SQS_VISIBILITY_SECONDS`: visibilidade do consumidor, para que a redelivery seja rápida nos testes.
+
+### 15.3 Determinismo
+- Domínio, casos de uso e workers recebem `Clock` e `random` injetados. Os testes usam relógio controlado (`mutableClock`) e jitter fixo.
+- Esperas por processo ou fila usam condição com prazo (`waitFor`), e não `sleep` fixo.
+- A suíte de concorrência foi executada três vezes seguidas sem falha intermitente (16 testes em cada execução).
+
+### 15.4 Limitações
+- **Publicação duplicada na outbox** é testada com uma falha simulada depois do envio (exceção), e não com a morte real do publisher. A morte real é coberta para o consumidor, que é o ponto de entrega ao sistema de negócio.
+- A reinicialização do serviço é testada com SIGTERM e SIGKILL reais. Não há reinício de LocalStack nem de PostgreSQL durante a suíte.
+- Testes de carga (diferencial opcional, seção 14 do enunciado) não foram implementados.
 
 ## 12. Pendências desta documentação
 
