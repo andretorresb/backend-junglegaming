@@ -251,7 +251,7 @@ A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da
 
 ### 11.4 Health
 - `/health/live`: sem IO.
-- `/health/ready`: PostgreSQL (`select 1`) e SQS (`ListQueues`) em paralelo, timeout de 3s por dependência. Falha em qualquer uma → 503 com `checks` e `errors`.
+- `/health/ready`: PostgreSQL (`select 1`) e SQS (`ListQueues`) em paralelo, timeout de 3s por dependência. Falha em qualquer uma → 503 com `checks`. O motivo do erro vai para o log (`readiness_check_failed`), e não para a resposta: a resposta pública não expõe endpoints internos nem mensagens de SDK.
 - Timeout de 3s, e não 1s: a primeira chamada a uma dependência fria (pool, SDK) pode passar de 2s. Um probe que dá falso negativo no boot é pior que um probe um pouco mais lento.
 
 ### 11.5 Contrato
@@ -429,6 +429,8 @@ Invariante final: `assertLedgerInvariant` (saldo == soma do ledger) roda ao fim 
 - **Limite de redrive (mesma família).** O redrive do SQS usava 5 fixo, independentemente de `SQS_MAX_RECEIVE_COUNT`. Agora usa o valor configurado, e o consumidor e o SQS compartilham o mesmo limite.
 
 ### 16.1 Trade-offs conscientes
+- **Ordem por wallet nas retentativas (decisão mantida).** O grupo FIFO é o `walletId`. Enquanto uma mensagem de uma wallet está em retentativa, as seguintes da mesma wallet esperam, até ela ter sucesso ou ir para a DLQ. É o custo de manter os lançamentos de cada wallet em ordem. Alternativa descartada: grupo por transação, que liberaria o paralelismo, mas permitiria um ROLLBACK chegar antes da BET que ele reverte.
+- **`/metrics` público (decisão mantida).** Expõe volumes de negócio sem autenticação. Em produção deve ficar atrás da rede interna ou de um proxy que bloqueie a rota externa.
 - **Lock pessimista por wallet.** Simples e previsível, mas uma wallet quente serializa as operações dela. Sob contenção, a espera passa de 2s e a resposta é 503 com `Retry-After`. Não há perda, e o cliente repete. Alternativa descartada: optimistic locking com retry, que daria retry em massa numa hot wallet.
 - **Idempotência no banco, sem cache.** O `UNIQUE` e o lock de wallet garantem o efeito único. Custo: uma consulta extra por requisição.
 - **Replay devolve o saldo observado** (`balance_observed`). Custo: uma coluna a mais em `wager_transactions`.

@@ -204,7 +204,7 @@ Para testar o consumidor sem a API, envie uma mensagem para `wager-transactions.
 
 - **Logs:** uma linha JSON por evento, em stdout. Campos de correlação: `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId`. Valores monetários e payloads nunca entram no log.
 - **Correlação:** envie `x-correlation-id` para correlacionar uma requisição. Sem o cabeçalho, a aplicação gera um.
-- **Métricas:** `GET http://localhost:3000/metrics` (formato Prometheus).
+- **Métricas:** `GET http://localhost:3000/metrics` (formato Prometheus). A rota não exige autenticação: em produção, deve ficar atrás da rede interna ou de um proxy.
 - **Health:** `/health/live` (processo) e `/health/ready` (PostgreSQL, SQS e drenagem).
 
 ## Solução de problemas

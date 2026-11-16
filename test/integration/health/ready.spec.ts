@@ -68,12 +68,14 @@ describe('Health — ready depende de PostgreSQL e SQS', () => {
 
     it('ready responde 503 com o detalhe por dependência; live continua 200', async () => {
       const ready = await fetch(`${ctx.base}/health/ready`);
-      const body = (await ready.json()) as { status: string; checks: Record<string, string>; errors: Record<string, string> };
+      const body = (await ready.json()) as { status: string; checks: Record<string, string>; errors?: unknown };
       expect(ready.status).toBe(503);
       expect(body.status).toBe('down');
       expect(body.checks['postgres']).toBe('up');
       expect(body.checks['sqs']).toBe('down');
-      expect(body.errors['sqs']).toBeDefined();
+      // o motivo não vai para a resposta pública
+      expect(body.errors).toBeUndefined();
+      expect(JSON.stringify(body)).not.toContain('127.0.0.1:9');
       expect((await fetch(`${ctx.base}/health/live`)).status).toBe(200);
     }, 30_000);
   });

@@ -23,10 +23,11 @@ export class HealthController {
   @Get('ready')
   async ready(@Res({ passthrough: true }) res: Response) {
     const report = await this.readiness.run();
+    // Resposta sem detalhes de erro: o motivo está no log (readiness_check_failed).
     if (!report.ok) {
       res.status(503);
-      return { status: 'down', ...report };
+      return { status: 'down', checks: report.checks };
     }
-    return { status: 'ok', ...report };
+    return { status: 'ok', checks: report.checks };
   }
 }

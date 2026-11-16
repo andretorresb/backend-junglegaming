@@ -15,7 +15,7 @@ sempre trazem `failureCode` (ver `docs/failure-codes.md`).
 | Não encontrado (wallet, transação) | 404 | `{ code: "NOT_FOUND" \| "WALLET_NOT_FOUND", message }` |
 | Conflito de idempotência ou wallet duplicada | 409 | `{ code: "IDEMPOTENCY_CONFLICT" \| "DUPLICATE_WALLET", failureCode, message }` |
 | Falha transitória (lock, deadlock, conexão) | 503 + `Retry-After: 1` | `{ code: "TRANSIENT_UNAVAILABLE", message }` |
-| Health `ready` com dependência fora | 503 | `{ status: "down", checks, errors }` |
+| Health `ready` com dependência fora | 503 | `{ status: "down", checks: { postgres, sqs, draining } }`. O motivo do erro vai para o log (`readiness_check_failed`), não para a resposta |
 | Erro inesperado | 500 | `{ code: "INTERNAL_ERROR" }` (sem stack no corpo) |
 
 ## Endpoints
@@ -30,7 +30,7 @@ sempre trazem `failureCode` (ver `docs/failure-codes.md`).
 | `GET /wagering/transactions/:transactionId` | Transação por id interno. |
 | `GET /providers/:providerId/wagering/transactions/:externalTransactionId` | Transação por id do provedor. |
 | `GET /health/live` | Processo vivo. Sem IO, sem autenticação. |
-| `GET /health/ready` | PostgreSQL e SQS alcançáveis, com timeout de 3s por dependência. Sem autenticação. |
+| `GET /health/ready` | PostgreSQL e SQS alcançáveis, com timeout de 3s por dependência. Resposta sem detalhes de erro. Sem autenticação. |
 
 ## Cursor do ledger
 - Base64url de JSON `{ t: <ISO-8601>, i: <uuid> }`. O cliente não deve interpretá-lo.

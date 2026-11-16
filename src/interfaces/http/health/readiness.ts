@@ -18,6 +18,8 @@ export class ReadinessChecker {
     private readonly checks: readonly ReadinessCheck[],
     /** 3s: a primeira chamada a uma dependência fria (pool, SDK) pode passar de 2s. */
     private readonly timeoutMs = 3000,
+    /** Motivo da falha vai para o log, nunca para a resposta HTTP. */
+    private readonly onFailure: (name: string, reason: string) => void = () => undefined,
   ) {}
 
   async run(): Promise<ReadinessReport> {
@@ -26,7 +28,10 @@ export class ReadinessChecker {
     const errors: Record<string, string> = {};
     for (const result of results) {
       checks[result.name] = result.error === undefined ? 'up' : 'down';
-      if (result.error !== undefined) errors[result.name] = result.error;
+      if (result.error !== undefined) {
+        errors[result.name] = result.error;
+        this.onFailure(result.name, result.error);
+      }
     }
     const ok = Object.keys(errors).length === 0;
     return ok ? { ok, checks } : { ok, checks, errors };

@@ -7,6 +7,8 @@ import mikroOrmConfig from '../mikro-orm.config';
 import { AuthGuard } from './interfaces/http/auth/auth.guard';
 import { HealthController } from './interfaces/http/health/health.controller';
 import { ReadinessChecker } from './interfaces/http/health/readiness';
+import { JsonLogger } from './infrastructure/observability/json-logger';
+import { loadEnv } from './config/env';
 import { WagerModule } from './interfaces/http/wagering/wagering.module';
 import { CONSUMER_LIFECYCLE, READINESS, SQS_CLIENT } from './interfaces/http/wagering/wagering.tokens';
 import type { ConsumerLifecycle } from './interfaces/messaging/sqs/lifecycle';
@@ -18,7 +20,9 @@ import type { ConsumerLifecycle } from './interfaces/messaging/sqs/lifecycle';
     {
       provide: READINESS,
       inject: [EntityManager, SQS_CLIENT, CONSUMER_LIFECYCLE],
-      useFactory: (em: EntityManager, sqs: SQSClient, lifecycle: ConsumerLifecycle) =>
+      useFactory: (em: EntityManager, sqs: SQSClient, lifecycle: ConsumerLifecycle) => {
+        const logger = new JsonLogger(loadEnv().serviceName);
+        return (
         new ReadinessChecker([
           {
             name: 'postgres',
@@ -35,7 +39,8 @@ import type { ConsumerLifecycle } from './interfaces/messaging/sqs/lifecycle';
               if (lifecycle.draining) throw new Error('drenando mensagens (shutdown em andamento)');
             },
           },
-        ]),
+        ], 3000, (name, reason) => logger.error('readiness_check_failed', { check: name, reason })));
+      },
     },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
