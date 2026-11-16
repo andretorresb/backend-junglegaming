@@ -13,7 +13,8 @@ import {
 import { InvalidInvariantError } from '../../domain/errors';
 import type { Clock } from '../ports/clock';
 import { applyReversal, isWaitingForReference } from './apply-reversal';
-import { createEnvelope } from './envelope';
+import { balanceChangedEvent, eventContext, outcomeEvent } from './events';
+import type { EventContext } from '../../domain/events/integration-event';
 import type { WagerRepositories, WagerUnitOfWork } from './ports';
 
 export interface PendingReferenceWorkerOptions {
@@ -139,17 +140,7 @@ export class PendingReferenceWorker {
         }),
       );
       await repos.saveWallet(wallet, movement.walletVersion - 1);
-      await repos.enqueueOutbox(
-        this.envelope(pending, now, 'WalletBalanceChanged', wallet.id, {
-          walletId: wallet.id,
-          transactionId: pending.id,
-          direction: movement.direction,
-          money: movement.money.toJSON(),
-          balanceBefore: movement.balanceBefore.toJSON(),
-          balanceAfter: movement.balanceAfter.toJSON(),
-          walletVersion: movement.walletVersion,
-        }),
-      );
+      await repos.enqueueOutbox(balanceChangedEvent(movement, wallet.id, pending.id, this.ctx(pending, now)));
     }
 
     await this.publishResult(repos, pending, wallet, now);
@@ -188,20 +179,7 @@ export class PendingReferenceWorker {
     wallet: Wallet,
     now: Date,
   ): Promise<void> {
-    const eventType =
-      tx.status === WagerTransactionStatus.Rejected ? 'WagerTransactionRejected' : 'WagerTransactionProcessed';
-    await repos.enqueueOutbox(
-      this.envelope(tx, now, eventType, tx.id, {
-        transactionId: tx.id,
-        providerId: tx.providerId,
-        externalTransactionId: tx.externalTransactionId,
-        walletId: tx.walletId,
-        kind: tx.kind,
-        status: tx.status,
-        failureCode: tx.failureCode ?? null,
-        balance: wallet.balance.toJSON(),
-      }),
-    );
+    await repos.enqueueOutbox(outcomeEvent(tx, wallet.balance.toJSON(), this.ctx(tx, now)));
   }
 
   /** Registro estruturado por tentativa. Sem valores monetários nem payloads. */
@@ -217,20 +195,8 @@ export class PendingReferenceWorker {
     });
   }
 
-  private envelope(
-    tx: WagerTransaction,
-    occurredAt: Date,
-    eventType: string,
-    aggregateId: string,
-    data: Record<string, unknown>,
-  ) {
-    return createEnvelope({
-      nextId: this.nextId,
-      correlationId: `pending:${tx.id}`,
-      occurredAt,
-      eventType,
-      aggregateId,
-      data,
-    });
+  /** Correlação do worker: liga o desfecho à transação pendente. */
+  private ctx(tx: WagerTransaction, occurredAt: Date): EventContext {
+    return eventContext(this.nextId, `pending:${tx.id}`, occurredAt);
   }
 }

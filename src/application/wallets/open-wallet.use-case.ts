@@ -5,7 +5,7 @@ import { WalletLedgerEntry } from '../../domain/wallet/wallet-ledger-entry';
 import { LedgerDirection } from '../../domain/ledger/ledger-direction';
 import { WagerTransaction, WagerTransactionKind } from '../../domain/wagering/wager-transaction';
 import type { Clock } from '../ports/clock';
-import { createEnvelope } from '../wagering/envelope';
+import { balanceChangedEvent, eventContext, outcomeEvent } from '../wagering/events';
 import { DuplicateWalletError, UniqueViolationError } from '../wagering/errors';
 import type { WagerUnitOfWork } from '../wagering/ports';
 
@@ -25,8 +25,8 @@ export interface OpenWalletResult {
 }
 
 /**
- * Cria a wallet. Com saldo inicial positivo, grava também a transação interna OPENING
- * e o lançamento CREDIT correspondente, na mesma transação SQL (seção 9 do enunciado).
+ * Cria a wallet. Com saldo inicial positivo, grava também a transação interna OPENING,
+ * o lançamento CREDIT correspondente e os eventos, na mesma transação SQL (seção 9 do enunciado).
  *
  * Sem idempotency key: a unicidade (playerId, currency) no banco é a proteção contra duplicidade.
  */
@@ -75,35 +75,30 @@ export class OpenWallet {
           opening.markProcessed(undefined, at, wallet.balance);
           await repos.insertTransaction(opening);
 
+          const zero = Money.zero(initial.currency);
           const entry = WalletLedgerEntry.create({
             id: this.nextId(),
             walletId,
             transactionId: opening.id,
             direction: LedgerDirection.Credit,
             money: initial,
-            balanceBefore: Money.zero(initial.currency),
+            balanceBefore: zero,
             balanceAfter: wallet.balance,
             createdAt: at,
           });
           await repos.insertLedgerEntry(entry);
 
+          const ctx = eventContext(this.nextId, command.correlationId, at);
           await repos.enqueueOutbox(
-            createEnvelope({
-              nextId: this.nextId,
-              correlationId: command.correlationId,
-              occurredAt: at,
-              eventType: 'WalletBalanceChanged',
-              aggregateId: walletId,
-              data: {
-                walletId,
-                transactionId: opening.id,
-                direction: LedgerDirection.Credit,
-                money: initial.toJSON(),
-                balanceBefore: Money.zero(initial.currency).toJSON(),
-                balanceAfter: wallet.balance.toJSON(),
-                walletVersion: wallet.version,
-              },
-            }),
+            balanceChangedEvent(
+              { direction: LedgerDirection.Credit, money: initial, balanceBefore: zero, balanceAfter: wallet.balance, walletVersion: wallet.version, at },
+              walletId,
+              opening.id,
+              ctx,
+            ),
+          );
+          await repos.enqueueOutbox(
+            outcomeEvent(opening, wallet.balance.toJSON(), eventContext(this.nextId, command.correlationId, at)),
           );
         }
 

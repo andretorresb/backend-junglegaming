@@ -63,7 +63,8 @@ describe('POST /wallets — OpenWallet', () => {
     );
     expect(ledger.rows).toEqual([{ direction: 'CREDIT', balance_before: '0.00', balance_after: '1000.00' }]);
     const events = await client.query<{ event_type: string }>('SELECT event_type FROM outbox_messages');
-    expect(events.rows.map((r) => r.event_type)).toEqual(['WalletBalanceChanged']);
+    // OPENING é uma transação aplicada: gera Processed e BalanceChanged (seção 11 do enunciado)
+    expect(events.rows.map((r) => r.event_type).sort()).toEqual(['WagerTransactionProcessed', 'WalletBalanceChanged']);
     await assertLedgerInvariant(client, result.id);
   });
 

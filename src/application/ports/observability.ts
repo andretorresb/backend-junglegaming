@@ -11,4 +11,6 @@ export interface Logger {
 
 export interface Metrics {
   increment(name: string, labels?: Record<string, string>, by?: number): void;
+  /** Valor atual de um medidor (gauge). */
+  set(name: string, value: number, labels?: Record<string, string>): void;
 }

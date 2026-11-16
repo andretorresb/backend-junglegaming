@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 6 (API HTTP)**.
+Estado atual: **Etapa 7 (transactional outbox)**.
 
 ## 1. Stack
 
@@ -260,6 +260,39 @@ A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da
 ### 11.6 Testes
 - `test/integration/wallets/queries.spec.ts`: consultas, paginação de 120 itens, limite, cursor inválido, paginação com inserções concorrentes, reconciliação consistente e divergente (com métrica), e wallet inexistente.
 - `test/integration/health/ready.spec.ts`: ready 200 com PostgreSQL e SQS; ready 503 com SQS inalcançável, live continua 200.
+
+## 12. Transactional outbox (Etapa 7)
+
+### 12.1 Eventos (seção 11 do enunciado)
+- `IntegrationEvent<T>` é abstrata. Cada subclasse fixa `eventType` e `version` no tipo: `WagerTransactionProcessed`, `WagerTransactionRejected`, `WalletBalanceChanged`, `WagerTransactionPendingReference`.
+- `data` usa `MoneyProps` (string), nunca `Money`.
+- `WagerTransactionProcessed` cobre toda transação aplicada, inclusive LOSS e o OPENING da criação de wallet.
+- `WalletBalanceChanged` é emitido **somente** quando o saldo muda.
+- Envelope: `{ eventId, eventType, aggregateId, correlationId, causationId?, occurredAt (ISO-8601), version, data }`.
+- `eventId` é gerado uma vez e preservado nos reenvios. É a base da deduplicação do consumidor.
+
+### 12.2 Escrita atômica
+- Os eventos são gravados na outbox dentro da mesma transação SQL da alteração que os originou.
+- Testado: falha depois da gravação da outbox desfaz tudo, sem evento órfão.
+
+### 12.3 Publicação
+- `OutboxPublisherWorker`: cada mensagem é tratada em transação própria. Reivindica com `FOR UPDATE SKIP LOCKED`, publica no SQS, marca como publicada e comita.
+- Falha de publicação: `scheduleRetry` com backoff exponencial (base 1s, teto `OUTBOX_MAX_BACKOFF_MS`), na mesma transação.
+- Fila de destino: `wager-events` (padrão, configurável por `EVENTS_QUEUE_NAME`). Fila padrão, não FIFO: a deduplicação é do consumidor, pelo `eventId`.
+- Fila criada por `bun run localstack:init` (`scripts/localstack/init-queues.ts`). `ensureQueues` também cria `wager-transactions.fifo` e a DLQ, com redrive após `MAX_RECEIVE_COUNT` (5).
+
+### 12.4 Semântica: at-least-once
+- Se o processo morre depois de publicar e antes de marcar, a mensagem continua pendente e é publicada de novo, **com o mesmo `eventId`**.
+- Testado: falha depois do envio → o mesmo `eventId` aparece duas vezes na fila, e nenhum outro duplica.
+
+### 12.5 Lag
+- `outbox_lag_seconds` (gauge): idade da mensagem pendente mais antiga. Zero quando não há pendências.
+- Contadores: `outbox_published_total` e `outbox_publish_failed_total`.
+
+### 12.6 Testes
+- `test/unit/domain/events-and-outbox.spec.ts`: envelope, `causationId` opcional, backoff, transições da `OutboxMessage`.
+- `test/integration/outbox/`: escrita atômica, publicação real no SQS, falha com backoff, lag, id da outbox preservado.
+- `test/concurrency/outbox-concurrency.spec.ts`: dois publishers sobre 200 eventos (cada um chega uma vez); duplicidade controlada após falha.
 
 ## 11. Pendências desta documentação
 

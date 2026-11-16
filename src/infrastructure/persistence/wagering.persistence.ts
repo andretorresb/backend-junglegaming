@@ -1,5 +1,8 @@
 import { EntityManager, LockMode } from '@mikro-orm/core';
-import type { WagerRepositories, OutboxEnvelope, WagerUnitOfWork } from '../../application/wagering/ports';
+import type { WagerRepositories, WagerUnitOfWork } from '../../application/wagering/ports';
+import type { IntegrationEvent } from '../../domain/events/integration-event';
+import { OutboxMessage } from '../../domain/outbox/outbox-message';
+import { outboxToRecord } from './mappers';
 import {
   TransientInfrastructureError,
   UniqueViolationError,
@@ -116,19 +119,9 @@ export class MikroOrmWagerRepositories implements WagerRepositories {
     await this.em.insert(WalletLedgerEntryRecord, ledgerEntryToRecord(entry));
   }
 
-  async enqueueOutbox(message: OutboxEnvelope): Promise<void> {
-    await this.em.insert(OutboxMessageRecord, {
-      id: message.id,
-      aggregateId: message.aggregateId,
-      eventType: message.eventType,
-      payload: message.payload,
-      occurredAt: message.occurredAt,
-      attempts: 0,
-      nextAttemptAt: null,
-      publishedAt: null,
-    });
-  }
-}
+  async enqueueOutbox(event: IntegrationEvent<unknown>): Promise<void> {
+    await this.em.insert(OutboxMessageRecord, outboxToRecord(OutboxMessage.enqueue(event)));
+  }}
 
 export class MikroOrmWagerUnitOfWork implements WagerUnitOfWork {
   constructor(private readonly em: EntityManager) {}

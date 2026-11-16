@@ -9,3 +9,6 @@ export const LOGGER = Symbol('LOGGER');
 export const METRICS = Symbol('METRICS');
 export const READINESS = Symbol('READINESS');
 export const SQS_CLIENT = Symbol('SQS_CLIENT');
+export const OUTBOX_PUBLISHER = Symbol('OUTBOX_PUBLISHER');
+export const OUTBOX_SCHEDULE = Symbol('OUTBOX_SCHEDULE');
+export const EVENT_PUBLISHER = Symbol('EVENT_PUBLISHER');

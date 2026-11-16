@@ -16,7 +16,7 @@ import {
 } from '../../domain/wagering/reference-retry-policy';
 import type { Clock } from '../ports/clock';
 import { applyReversal, isWaitingForReference, type ReversalContext } from './apply-reversal';
-import { createEnvelope } from './envelope';
+import { balanceChangedEvent, eventContext, outcomeEvent, pendingReferenceEvent } from './events';
 import {
   IdempotencyConflictError,
   InternalOnlyKindError,
@@ -24,7 +24,8 @@ import {
   UniqueViolationError,
   WalletNotFoundError,
 } from './errors';
-import type { OutboxEnvelope, WagerRepositories, WagerUnitOfWork } from './ports';
+import type { WagerRepositories, WagerUnitOfWork } from './ports';
+import type { EventContext } from '../../domain/events/integration-event';
 
 /** Parâmetros de espera por referência e de jitter. Injetáveis para testes. */
 export interface ProcessWagerTransactionOptions {
@@ -179,15 +180,7 @@ export class ProcessWagerTransaction {
     if (isReversal(command.kind) && (reference === undefined || isWaitingForReference(reference))) {
       tx.markPendingReference(this.nextAttemptAt(now));
       await repos.insertTransaction(tx);
-      await repos.enqueueOutbox(
-        this.envelope(command, now, 'WagerTransactionPendingReference', tx.id, {
-          transactionId: tx.id,
-          providerId: tx.providerId,
-          referenceExternalTransactionId: command.referenceExternalTransactionId ?? null,
-          walletId: tx.walletId,
-          nextAttemptAt: tx.nextReferenceAttemptAt?.toISOString() ?? null,
-        }),
-      );
+      await repos.enqueueOutbox(pendingReferenceEvent(tx, this.ctx(command, now)));
       return {
         transactionId: tx.id,
         status: tx.status,
@@ -214,32 +207,10 @@ export class ProcessWagerTransaction {
       });
       await repos.insertLedgerEntry(entry);
       await repos.saveWallet(wallet, movement.walletVersion - 1);
-      await repos.enqueueOutbox(
-        this.envelope(command, now, 'WalletBalanceChanged', wallet.id, {
-          walletId: wallet.id,
-          transactionId: tx.id,
-          direction: movement.direction,
-          money: movement.money.toJSON(),
-          balanceBefore: movement.balanceBefore.toJSON(),
-          balanceAfter: movement.balanceAfter.toJSON(),
-          walletVersion: movement.walletVersion,
-        }),
-      );
+      await repos.enqueueOutbox(balanceChangedEvent(movement, wallet.id, tx.id, this.ctx(command, now)));
     }
 
-    const eventType = tx.status === WagerTransactionStatus.Rejected ? 'WagerTransactionRejected' : 'WagerTransactionProcessed';
-    await repos.enqueueOutbox(
-      this.envelope(command, now, eventType, tx.id, {
-        transactionId: tx.id,
-        providerId: tx.providerId,
-        externalTransactionId: tx.externalTransactionId,
-        walletId: tx.walletId,
-        kind: tx.kind,
-        status: tx.status,
-        failureCode: tx.failureCode ?? null,
-        balance: wallet.balance.toJSON(),
-      }),
-    );
+    await repos.enqueueOutbox(outcomeEvent(tx, wallet.balance.toJSON(), this.ctx(command, now)));
 
     return {
       transactionId: tx.id,
@@ -255,14 +226,8 @@ export class ProcessWagerTransaction {
     return new Date(now.getTime() + nextAttemptDelayMs(0, this.options.retryPolicy, this.options.random()));
   }
 
-  private envelope(
-    command: ProcessWagerTransactionCommand,
-    occurredAt: Date,
-    eventType: string,
-    aggregateId: string,
-    data: Record<string, unknown>,
-  ): OutboxEnvelope {
-    return createEnvelope({ nextId: this.nextId, correlationId: command.correlationId, occurredAt, eventType, aggregateId, data });
+  private ctx(command: ProcessWagerTransactionCommand, occurredAt: Date): EventContext {
+    return eventContext(this.nextId, command.correlationId, occurredAt);
   }
 }
 

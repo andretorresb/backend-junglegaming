@@ -20,7 +20,8 @@
     "migration:up": "bun scripts/migrate.ts up",
     "migration:down": "bun scripts/migrate.ts down",
     "migration:reset": "bun scripts/migrate.ts reset",
-    "migration:status": "bun scripts/migrate.ts status"
+    "migration:status": "bun scripts/migrate.ts status",
+    "localstack:init": "bun scripts/localstack/init-queues.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.700.0",

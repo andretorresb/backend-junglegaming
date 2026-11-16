@@ -3,7 +3,8 @@ import { WalletLedgerEntry } from '../../domain/wallet/wallet-ledger-entry';
 import { Wallet } from '../../domain/wallet/wallet';
 import { WagerTransaction, type WagerTransactionKind, type WagerTransactionStatus } from '../../domain/wagering/wager-transaction';
 import { FailureCode } from '../../domain/failure-code';
-import type { WalletLedgerEntryRecord, WagerTransactionRecord, WalletRecord } from './entities/records';
+import type { OutboxMessageRecord, WalletLedgerEntryRecord, WagerTransactionRecord, WalletRecord } from './entities/records';
+import { OutboxMessage } from '../../domain/outbox/outbox-message';
 
 /**
  * Mapeadores entre registros de persistência e agregados de domínio.
@@ -114,3 +115,29 @@ export function wagerTransactionToRecord(tx: WagerTransaction): WagerTransaction
   };
 }
 
+
+export function outboxToRecord(message: OutboxMessage): OutboxMessageRecord {
+  return {
+    id: message.id,
+    aggregateId: message.aggregateId,
+    eventType: message.eventType,
+    payload: message.payload as Record<string, unknown>,
+    occurredAt: message.occurredAt,
+    attempts: message.attempts,
+    nextAttemptAt: message.nextAttemptAt ?? null,
+    publishedAt: message.publishedAt ?? null,
+  };
+}
+
+export function outboxFromRecord(record: OutboxMessageRecord): OutboxMessage {
+  return OutboxMessage.rehydrate({
+    id: record.id,
+    aggregateId: record.aggregateId,
+    eventType: record.eventType,
+    payload: record.payload,
+    occurredAt: record.occurredAt,
+    attempts: record.attempts,
+    nextAttemptAt: record.nextAttemptAt ?? undefined,
+    publishedAt: record.publishedAt ?? undefined,
+  });
+}

@@ -15,6 +15,11 @@ import { InMemoryMetrics } from '../../../infrastructure/observability/in-memory
 import { SystemClock } from '../../../infrastructure/time/system-clock';
 import type { ReferenceRetryPolicy } from '../../../domain/wagering/reference-retry-policy';
 import { PendingReferenceScheduler } from '../../workers/pending-reference.scheduler';
+import { OutboxPublisherScheduler } from '../../workers/outbox-publisher.scheduler';
+import { OutboxPublisherWorker } from '../../../application/outbox/outbox-publisher.worker';
+import { MikroOrmOutboxUnitOfWork } from '../../../infrastructure/persistence/outbox.persistence';
+import { SqsEventPublisher } from '../../../infrastructure/messaging/sqs-event-publisher';
+import { createSqsClient } from '../../../infrastructure/messaging/sqs-client';
 import { ApplicationErrorFilter } from '../errors/application-error.filter';
 import { WalletController } from '../wallets/wallets.controller';
 import { WagerController } from './wagering.controller';
@@ -28,6 +33,9 @@ import {
   LOGGER,
   METRICS,
   WALLET_QUERIES,
+  OUTBOX_PUBLISHER,
+  OUTBOX_SCHEDULE,
+  EVENT_PUBLISHER,
 } from './wagering.tokens';
 
 export const CLOCK = Symbol('CLOCK');
@@ -75,6 +83,25 @@ const logWorker = (entry: WorkerLogEntry): void => {
       },
     },
     PendingReferenceScheduler,
+    { provide: EVENT_PUBLISHER, useFactory: () => { const env = loadEnv(); return new SqsEventPublisher(createSqsClient(env), env.outbox.queueName); } },
+    {
+      provide: OUTBOX_PUBLISHER,
+      inject: [EntityManager, EVENT_PUBLISHER, CLOCK, METRICS, LOGGER],
+      useFactory: (em: EntityManager, publisher: SqsEventPublisher, clock: Clock, metrics: InMemoryMetrics, logger: JsonLogger) => {
+        const env = loadEnv();
+        return new OutboxPublisherWorker(new MikroOrmOutboxUnitOfWork(em), publisher, clock, metrics, logger, {
+          retryPolicy: { baseDelayMs: 1000, maxDelayMs: env.outbox.maxBackoffMs },
+        });
+      },
+    },
+    {
+      provide: OUTBOX_SCHEDULE,
+      useFactory: () => {
+        const { pollMs, batchSize } = loadEnv().outbox;
+        return { pollMs, batchSize };
+      },
+    },
+    OutboxPublisherScheduler,
     {
       provide: OPEN_WALLET,
       inject: [EntityManager, CLOCK],

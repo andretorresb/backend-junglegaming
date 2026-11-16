@@ -14,6 +14,10 @@ export class InMemoryMetrics implements Metrics {
     this.counters.set(key, (this.counters.get(key) ?? 0) + by);
   }
 
+  set(name: string, value: number, labels: Labels = {}): void {
+    this.counters.set(this.key(name, labels), value);
+  }
+
   value(name: string, labels: Labels = {}): number {
     return this.counters.get(this.key(name, labels)) ?? 0;
   }

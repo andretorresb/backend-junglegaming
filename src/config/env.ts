@@ -18,6 +18,13 @@ export interface AppEnv {
     readonly accessKeyId: string;
     readonly secretAccessKey: string;
   };
+  readonly outbox: {
+    /** Intervalo entre ciclos do publisher. 0 desliga o agendamento. */
+    readonly pollMs: number;
+    readonly batchSize: number;
+    readonly maxBackoffMs: number;
+    readonly queueName: string;
+  };
   readonly pendingReference: {
     /** Intervalo entre ciclos do worker. 0 desliga o agendamento (usado nos testes). */
     readonly pollMs: number;
@@ -45,6 +52,12 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
       region: source['AWS_REGION'] ?? 'us-east-1',
       accessKeyId: source['AWS_ACCESS_KEY_ID'] ?? 'test',
       secretAccessKey: source['AWS_SECRET_ACCESS_KEY'] ?? 'test',
+    },
+    outbox: {
+      pollMs: parseIntEnv(source['OUTBOX_POLL_MS'], 500, 'OUTBOX_POLL_MS', 0),
+      batchSize: parseIntEnv(source['OUTBOX_BATCH_SIZE'], 50, 'OUTBOX_BATCH_SIZE'),
+      maxBackoffMs: parseIntEnv(source['OUTBOX_MAX_BACKOFF_MS'], 300_000, 'OUTBOX_MAX_BACKOFF_MS'),
+      queueName: source['EVENTS_QUEUE_NAME'] ?? 'wager-events',
     },
     pendingReference: {
       pollMs: parseIntEnv(source['PENDING_REFERENCE_POLL_MS'], 1000, 'PENDING_REFERENCE_POLL_MS', 0),

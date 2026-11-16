@@ -1,15 +1,7 @@
 import type { WalletLedgerEntry } from '../../domain/wallet/wallet-ledger-entry';
 import type { Wallet } from '../../domain/wallet/wallet';
 import type { WagerTransaction } from '../../domain/wagering/wager-transaction';
-
-/** Mensagem a publicar, gravada na outbox na mesma transação (Etapa 7 publica). */
-export interface OutboxEnvelope {
-  id: string;
-  aggregateId: string;
-  eventType: string;
-  payload: Record<string, unknown>;
-  occurredAt: Date;
-}
+import type { IntegrationEvent } from '../../domain/events/integration-event';
 
 /**
  * Operações disponíveis dentro de uma única transação SQL.
@@ -34,7 +26,8 @@ export interface WagerRepositories {
    */
   claimDuePendingReference(now: Date, excludedIds: readonly string[]): Promise<WagerTransaction | undefined>;
   insertLedgerEntry(entry: WalletLedgerEntry): Promise<void>;
-  enqueueOutbox(message: OutboxEnvelope): Promise<void>;
+  /** Grava o evento na outbox, na mesma transação da alteração que o originou. */
+  enqueueOutbox(event: IntegrationEvent<unknown>): Promise<void>;
 }
 
 export interface WagerUnitOfWork {
