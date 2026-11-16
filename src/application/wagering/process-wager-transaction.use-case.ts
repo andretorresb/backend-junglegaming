@@ -15,6 +15,8 @@ import {
   type ReferenceRetryPolicy,
 } from '../../domain/wagering/reference-retry-policy';
 import type { Clock } from '../ports/clock';
+import { InboxMessage } from '../../domain/inbox/inbox-message';
+import { InboxDuplicateError } from './errors';
 import { applyReversal, isWaitingForReference, type ReversalContext } from './apply-reversal';
 import { balanceChangedEvent, eventContext, outcomeEvent, pendingReferenceEvent } from './events';
 import {
@@ -53,6 +55,12 @@ export interface ProcessWagerTransactionCommand {
   correlationId: string;
 }
 
+/** Mensagem da fila: a inbox é gravada na mesma transação do efeito (seção 6.5 e 10 do enunciado). */
+export interface InboxRequest {
+  consumerName: string;
+  messageId: string;
+}
+
 export interface ProcessWagerTransactionResult {
   transactionId: string;
   status: WagerTransactionStatus;
@@ -82,7 +90,7 @@ export class ProcessWagerTransaction {
     private readonly options: ProcessWagerTransactionOptions = DEFAULT_OPTIONS,
   ) {}
 
-  async execute(command: ProcessWagerTransactionCommand): Promise<ProcessWagerTransactionResult> {
+  async execute(command: ProcessWagerTransactionCommand, inbox?: InboxRequest): Promise<ProcessWagerTransactionResult> {
     if (command.kind === WagerTransactionKind.Opening) throw new InternalOnlyKindError();
     const money = Money.fromInput(command.money);
     const payloadHash = computePayloadHash({
@@ -98,12 +106,12 @@ export class ProcessWagerTransaction {
     });
 
     try {
-      return await this.attempt(command, money, payloadHash);
+      return await this.attempt(command, money, payloadHash, inbox);
     } catch (error) {
       // Corrida rara entre chaves diferentes com o mesmo external id (ou dupla reversão concorrente):
       // a segunda tentativa enxerga a linha já comitada e cai em replay, conflito ou rejeição.
       if (error instanceof UniqueViolationError) {
-        return this.attempt(command, money, payloadHash);
+        return this.attempt(command, money, payloadHash, inbox);
       }
       throw error;
     }
@@ -113,8 +121,9 @@ export class ProcessWagerTransaction {
     command: ProcessWagerTransactionCommand,
     money: Money,
     payloadHash: string,
+    inbox: InboxRequest | undefined,
   ): Promise<ProcessWagerTransactionResult> {
-    return this.uow.run((repos) => this.apply(repos, command, money, payloadHash));
+    return this.uow.run((repos) => this.apply(repos, command, money, payloadHash, inbox));
   }
 
   private async apply(
@@ -122,11 +131,44 @@ export class ProcessWagerTransaction {
     command: ProcessWagerTransactionCommand,
     money: Money,
     payloadHash: string,
+    inbox: InboxRequest | undefined,
   ): Promise<ProcessWagerTransactionResult> {
     const wallet = await repos.lockWallet(command.walletId);
     if (!wallet) {
       throw new WalletNotFoundError(command.walletId);
     }
+
+    // Inbox antes de qualquer decisão: também cobre replays. Mensagem repetida → InboxDuplicateError.
+    const inboxMessage = inbox ? await this.receiveInbox(repos, inbox, payloadHash) : undefined;
+    const result = await this.decide(repos, command, money, payloadHash, wallet);
+    if (inboxMessage) {
+      inboxMessage.markProcessed(this.clock.now());
+      await repos.markInboxProcessed(inboxMessage);
+    }
+    return result;
+  }
+
+  private async receiveInbox(repos: WagerRepositories, inbox: InboxRequest, payloadHash: string): Promise<InboxMessage> {
+    const message = InboxMessage.receive({
+      consumerName: inbox.consumerName,
+      messageId: inbox.messageId,
+      payloadHash,
+      receivedAt: this.clock.now(),
+    });
+    const inserted = await repos.insertInbox(message);
+    if (!inserted) {
+      throw new InboxDuplicateError(inbox.consumerName, inbox.messageId);
+    }
+    return message;
+  }
+
+  private async decide(
+    repos: WagerRepositories,
+    command: ProcessWagerTransactionCommand,
+    money: Money,
+    payloadHash: string,
+    wallet: Wallet,
+  ): Promise<ProcessWagerTransactionResult> {
 
     const sameKey = await repos.findTransactionByIdempotencyKey(command.idempotencyKey);
     if (sameKey) {

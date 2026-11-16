@@ -1,0 +1,3 @@
+[test]
+# Desliga os agendadores automáticos nas suítes. Quem precisa de um worker ou consumidor cria o seu.
+preload = ["./test/setup.ts"]

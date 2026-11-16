@@ -2,6 +2,7 @@ import type { WalletLedgerEntry } from '../../domain/wallet/wallet-ledger-entry'
 import type { Wallet } from '../../domain/wallet/wallet';
 import type { WagerTransaction } from '../../domain/wagering/wager-transaction';
 import type { IntegrationEvent } from '../../domain/events/integration-event';
+import type { InboxMessage } from '../../domain/inbox/inbox-message';
 
 /**
  * Operações disponíveis dentro de uma única transação SQL.
@@ -17,6 +18,12 @@ export interface WagerRepositories {
   /** Reversão já processada que aponta para esta transação (REFUND ou ROLLBACK), se existir. */
   findProcessedReversalOf(referenceTransactionId: string): Promise<WagerTransaction | undefined>;
   insertTransaction(tx: WagerTransaction): Promise<void>;
+  /**
+   * Registra a mensagem recebida na inbox, na mesma transação do efeito.
+   * Devolve `false` quando a mensagem já existe (duplicata). Não lança: a transação continua válida.
+   */
+  insertInbox(message: InboxMessage): Promise<boolean>;
+  markInboxProcessed(message: InboxMessage): Promise<void>;
   /** Grava o estado atual de uma transação já existente (status, referência, agendamento). */
   updateTransaction(tx: WagerTransaction): Promise<void>;
   /**

@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 7 (transactional outbox)**.
+Estado atual: **Etapa 8 (consumidor SQS)**.
 
 ## 1. Stack
 
@@ -293,6 +293,50 @@ A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da
 - `test/unit/domain/events-and-outbox.spec.ts`: envelope, `causationId` opcional, backoff, transições da `OutboxMessage`.
 - `test/integration/outbox/`: escrita atômica, publicação real no SQS, falha com backoff, lag, id da outbox preservado.
 - `test/concurrency/outbox-concurrency.spec.ts`: dois publishers sobre 200 eventos (cada um chega uma vez); duplicidade controlada após falha.
+
+## 13. Consumidor SQS (Etapa 8)
+
+### 13.1 Mensagem
+- Fila `wager-transactions.fifo`, DLQ `wager-transactions-dlq.fifo` (seção 10 do enunciado).
+- Corpo: `{ messageId, type: "WagerTransactionRequested", occurredAt, data }`. Validado com class-validator antes de qualquer efeito. Schema inválido ou JSON inválido → DLQ.
+- **Extensão do corpo:** `data.referenceExternalTransactionId`, obrigatório para REFUND e ROLLBACK. O enunciado não mostra esse campo no corpo da mensagem.
+- Grupo FIFO = `walletId`: operações da mesma wallet ficam em ordem; wallets distintas processam em paralelo.
+
+### 13.2 Mesmo caso de uso da HTTP
+- O consumidor chama `ProcessWagerTransaction.execute` com `{ consumerName: "wager-transactions", messageId }`.
+- A inbox é gravada **na mesma transação** do efeito, logo depois do lock da wallet e antes de qualquer decisão. Isso também cobre replays.
+- `INSERT ... ON CONFLICT DO NOTHING RETURNING`: a duplicata não lança erro, então a transação continua utilizável. Um erro de unicidade dentro da transação a abortaria no PostgreSQL. Testado: a primeira versão usava exceção, e a duplicata era tratada como transitória. Corrigido.
+- Duplicata (`InboxDuplicateError`): ack e métrica `duplicates_detected_total{source=sqs}`.
+
+### 13.3 Confirmação
+- **Ack só depois do commit.** A ordem é: commit do caso de uso → `afterCommit` (hook de teste) → `DeleteMessage`.
+- Falha depois do commit e antes do ack: a mensagem volta, a inbox impede o efeito duplicado. Testado.
+
+### 13.4 Classificação de erros
+| Classe | Exemplos | Ação |
+|---|---|---|
+| Negócio (resultado persistido) | saldo insuficiente, moeda/jogador divergentes, replay, reversão rejeitada | ack; REJECTED fica registrado |
+| Negócio (sem persistência) | `IdempotencyConflictError`, `RejectedBeforePersistenceError` | ack e log |
+| Mensagem já processada | `InboxDuplicateError` | ack |
+| Permanente | JSON/schema inválido, `OPENING`, wallet inexistente, valor inválido | DLQ com motivo |
+| Transitório | timeout de lock, deadlock, conexão, erro desconhecido | sem ack; visibilidade `base × 2^(tentativa−1)` limitada por `SQS_RETRY_MAX_SECONDS`; DLQ ao atingir `SQS_MAX_RECEIVE_COUNT` |
+
+- Para a DLQ: envia primeiro, depois confirma a original. Uma falha entre os dois passos gera cópia na DLQ. Nunca perda.
+- Wallet inexistente é tratada como permanente, e não como transitória. Uma wallet que ainda não existe é um dado a investigar, e retry automático não a cria.
+
+### 13.5 Shutdown (SIGTERM)
+- `enableShutdownHooks` chama `onModuleDestroy` → `stop()`.
+- `stop()`: para de receber; espera as mensagens em andamento até `SHUTDOWN_GRACE_MS`; as que sobrarem voltam para a fila com visibilidade zero. Mensagens recebidas depois do início do shutdown também voltam sem processar.
+- Durante o shutdown, `/health/ready` responde 503 pelo check `draining`, e o processo sai da rotação.
+- Testado: a mensagem em andamento termina (commit e ack), e a que não foi recebida permanece na fila.
+
+### 13.6 Configuração
+`WAGER_CONSUMER_ENABLED` (padrão 1), `SQS_WAGER_QUEUE`, `SQS_WAGER_DLQ`, `SQS_WAIT_SECONDS`, `SQS_MAX_MESSAGES`, `SQS_MAX_RECEIVE_COUNT`, `SQS_RETRY_BASE_SECONDS`, `SQS_RETRY_MAX_SECONDS`, `SHUTDOWN_GRACE_MS`.
+
+### 13.7 Testes
+- `test/integration/messaging/consumer.spec.ts` (10 casos): mensagem válida, entrega duplicada, JSON inválido, schema inválido, OPENING, wallet inexistente, rejeição de negócio, erro transitório até a DLQ, falha após o commit, shutdown com mensagem em andamento.
+- `test/concurrency/consumer-concurrency.spec.ts`: três consumidores, seis wallets, 60 mensagens com duplicatas. Cada efeito acontece uma vez, e a invariante fecha em cada wallet.
+- `test/setup.ts` (preload do `bun test`): desliga os agendadores automáticos. Quem precisa de um consumidor cria o seu.
 
 ## 11. Pendências desta documentação
 

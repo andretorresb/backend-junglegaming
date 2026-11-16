@@ -10,6 +10,7 @@ import {
 import type { WalletLedgerEntry } from '../../domain/wallet/wallet-ledger-entry';
 import type { Wallet } from '../../domain/wallet/wallet';
 import type { WagerTransaction } from '../../domain/wagering/wager-transaction';
+import type { InboxMessage } from '../../domain/inbox/inbox-message';
 import {
   ledgerEntryToRecord,
   wagerTransactionFromRecord,
@@ -18,6 +19,7 @@ import {
   walletToRecord,
 } from './mappers';
 import {
+  InboxMessageRecord,
   OutboxMessageRecord,
   WagerTransactionRecord,
   WalletLedgerEntryRecord,
@@ -80,6 +82,31 @@ export class MikroOrmWagerRepositories implements WagerRepositories {
 
   async insertTransaction(tx: WagerTransaction): Promise<void> {
     await this.em.insert(WagerTransactionRecord, wagerTransactionToRecord(tx));
+  }
+
+  /**
+   * ON CONFLICT DO NOTHING: uma duplicata não lança erro, então a transação continua utilizável.
+   * (Um erro de unicidade dentro da transação a abortaria no PostgreSQL.)
+   */
+  async insertInbox(message: InboxMessage): Promise<boolean> {
+    const rows = await this.em.getConnection().execute<{ message_id: string }[]>(
+      `INSERT INTO inbox_messages (consumer_name, message_id, payload_hash, received_at, processed_at)
+       VALUES (?, ?, ?, ?, NULL)
+       ON CONFLICT (consumer_name, message_id) DO NOTHING
+       RETURNING message_id`,
+      [message.consumerName, message.messageId, message.payloadHash, message.receivedAt],
+      'all',
+      this.em.getTransactionContext(),
+    );
+    return rows.length === 1;
+  }
+
+  async markInboxProcessed(message: InboxMessage): Promise<void> {
+    await this.em.nativeUpdate(
+      InboxMessageRecord,
+      { consumerName: message.consumerName, messageId: message.messageId },
+      { processedAt: message.processedAt ?? null },
+    );
   }
 
   async updateTransaction(tx: WagerTransaction): Promise<void> {

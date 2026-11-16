@@ -45,7 +45,7 @@ describe('Health — ready depende de PostgreSQL e SQS', () => {
       const ready = await fetch(`${ctx.base}/health/ready`);
       const body = (await ready.json()) as { status: string; checks: Record<string, string> };
       expect(ready.status).toBe(200);
-      expect(body.checks).toEqual({ postgres: 'up', sqs: 'up' });
+      expect(body.checks).toEqual({ postgres: 'up', sqs: 'up', draining: 'up' });
     });
 
     it('rotas de negócio exigem passar pelo guard (que hoje é no-op) e respondem normalmente', async () => {

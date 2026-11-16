@@ -12,3 +12,6 @@ export const SQS_CLIENT = Symbol('SQS_CLIENT');
 export const OUTBOX_PUBLISHER = Symbol('OUTBOX_PUBLISHER');
 export const OUTBOX_SCHEDULE = Symbol('OUTBOX_SCHEDULE');
 export const EVENT_PUBLISHER = Symbol('EVENT_PUBLISHER');
+export const WAGER_CONSUMER = Symbol('WAGER_CONSUMER');
+export const WAGER_CONSUMER_ENABLED = Symbol('WAGER_CONSUMER_ENABLED');
+export const CONSUMER_LIFECYCLE = Symbol('CONSUMER_LIFECYCLE');

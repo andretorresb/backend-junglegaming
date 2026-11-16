@@ -60,6 +60,16 @@ export class UniqueViolationError extends ApplicationError {
   }
 }
 
+/**
+ * A mensagem já foi processada por este consumidor (chave da inbox já existe). O efeito original
+ * está comitado, então a mensagem deve ser confirmada sem nova alteração.
+ */
+export class InboxDuplicateError extends ApplicationError {
+  constructor(consumerName: string, messageId: string) {
+    super(`mensagem ${messageId} já processada por ${consumerName}`, 'INBOX_DUPLICATE');
+  }
+}
+
 /** Wallet já existe para o mesmo playerId + currency. */
 export class DuplicateWalletError extends ApplicationError {
   constructor(playerId: string, currency: string) {

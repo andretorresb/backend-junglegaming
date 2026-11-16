@@ -18,6 +18,17 @@ export interface AppEnv {
     readonly accessKeyId: string;
     readonly secretAccessKey: string;
   };
+  readonly consumer: {
+    readonly enabled: boolean;
+    readonly queueName: string;
+    readonly dlqName: string;
+    readonly waitSeconds: number;
+    readonly maxMessages: number;
+    readonly maxReceiveCount: number;
+    readonly retryBaseSeconds: number;
+    readonly retryMaxSeconds: number;
+    readonly shutdownGraceMs: number;
+  };
   readonly outbox: {
     /** Intervalo entre ciclos do publisher. 0 desliga o agendamento. */
     readonly pollMs: number;
@@ -52,6 +63,17 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
       region: source['AWS_REGION'] ?? 'us-east-1',
       accessKeyId: source['AWS_ACCESS_KEY_ID'] ?? 'test',
       secretAccessKey: source['AWS_SECRET_ACCESS_KEY'] ?? 'test',
+    },
+    consumer: {
+      enabled: (source['WAGER_CONSUMER_ENABLED'] ?? '1') !== '0',
+      queueName: source['SQS_WAGER_QUEUE'] ?? 'wager-transactions.fifo',
+      dlqName: source['SQS_WAGER_DLQ'] ?? 'wager-transactions-dlq.fifo',
+      waitSeconds: parseIntEnv(source['SQS_WAIT_SECONDS'], 10, 'SQS_WAIT_SECONDS', 0),
+      maxMessages: parseIntEnv(source['SQS_MAX_MESSAGES'], 10, 'SQS_MAX_MESSAGES'),
+      maxReceiveCount: parseIntEnv(source['SQS_MAX_RECEIVE_COUNT'], 5, 'SQS_MAX_RECEIVE_COUNT'),
+      retryBaseSeconds: parseIntEnv(source['SQS_RETRY_BASE_SECONDS'], 5, 'SQS_RETRY_BASE_SECONDS'),
+      retryMaxSeconds: parseIntEnv(source['SQS_RETRY_MAX_SECONDS'], 900, 'SQS_RETRY_MAX_SECONDS'),
+      shutdownGraceMs: parseIntEnv(source['SHUTDOWN_GRACE_MS'], 10_000, 'SHUTDOWN_GRACE_MS', 0),
     },
     outbox: {
       pollMs: parseIntEnv(source['OUTBOX_POLL_MS'], 500, 'OUTBOX_POLL_MS', 0),

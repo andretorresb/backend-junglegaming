@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { SQSClient } from '@aws-sdk/client-sqs';
 import { Logger, Module, ValidationPipe } from '@nestjs/common';
 import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import { EntityManager } from '@mikro-orm/core';
@@ -16,6 +17,9 @@ import { SystemClock } from '../../../infrastructure/time/system-clock';
 import type { ReferenceRetryPolicy } from '../../../domain/wagering/reference-retry-policy';
 import { PendingReferenceScheduler } from '../../workers/pending-reference.scheduler';
 import { OutboxPublisherScheduler } from '../../workers/outbox-publisher.scheduler';
+import { WagerConsumerRunner } from '../../workers/wager-consumer.runner';
+import { WagerTransactionsConsumer } from '../../messaging/sqs/wager-transactions.consumer';
+import type { ConsumerLifecycle } from '../../messaging/sqs/lifecycle';
 import { OutboxPublisherWorker } from '../../../application/outbox/outbox-publisher.worker';
 import { MikroOrmOutboxUnitOfWork } from '../../../infrastructure/persistence/outbox.persistence';
 import { SqsEventPublisher } from '../../../infrastructure/messaging/sqs-event-publisher';
@@ -36,6 +40,10 @@ import {
   OUTBOX_PUBLISHER,
   OUTBOX_SCHEDULE,
   EVENT_PUBLISHER,
+  SQS_CLIENT,
+  WAGER_CONSUMER,
+  WAGER_CONSUMER_ENABLED,
+  CONSUMER_LIFECYCLE,
 } from './wagering.tokens';
 
 export const CLOCK = Symbol('CLOCK');
@@ -54,8 +62,33 @@ const logWorker = (entry: WorkerLogEntry): void => {
 
 @Module({
   controllers: [WagerController, WalletController],
+  exports: [SQS_CLIENT, CONSUMER_LIFECYCLE],
   providers: [
     { provide: CLOCK, useFactory: (): Clock => new SystemClock() },
+    { provide: SQS_CLIENT, useFactory: () => createSqsClient(loadEnv()) },
+    { provide: CONSUMER_LIFECYCLE, useFactory: (): ConsumerLifecycle => ({ draining: false }) },
+    {
+      provide: WAGER_CONSUMER,
+      inject: [SQS_CLIENT, PROCESS_WAGER_TRANSACTION, LOGGER, METRICS, CONSUMER_LIFECYCLE],
+      useFactory: (sqs: SQSClient, useCase: ProcessWagerTransaction, logger: JsonLogger, metrics: InMemoryMetrics, lifecycle: ConsumerLifecycle) => {
+        const c = loadEnv().consumer;
+        return new WagerTransactionsConsumer(
+          { sqs, useCase, logger, metrics, lifecycle },
+          {
+            queueName: c.queueName,
+            dlqName: c.dlqName,
+            waitSeconds: c.waitSeconds,
+            maxMessages: c.maxMessages,
+            maxReceiveCount: c.maxReceiveCount,
+            retryBaseSeconds: c.retryBaseSeconds,
+            retryMaxSeconds: c.retryMaxSeconds,
+            shutdownGraceMs: c.shutdownGraceMs,
+          },
+        );
+      },
+    },
+    { provide: WAGER_CONSUMER_ENABLED, useFactory: () => loadEnv().consumer.enabled },
+    WagerConsumerRunner,
     { provide: RETRY_POLICY, useFactory: retryPolicyFromEnv },
     {
       provide: PROCESS_WAGER_TRANSACTION,
