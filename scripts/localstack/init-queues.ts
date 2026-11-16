@@ -3,8 +3,9 @@
  * Pré-requisito: docker compose up -d
  */
 import { createSqsClient } from '../../src/infrastructure/messaging/sqs-client';
-import { ensureQueues } from '../../src/infrastructure/messaging/queues';
+import { ensureQueues, queueSettingsFromEnv } from '../../src/infrastructure/messaging/queues';
 import { loadEnv } from '../../src/config/env';
 
-const queues = await ensureQueues(createSqsClient(loadEnv()));
+const env = loadEnv();
+const queues = await ensureQueues(createSqsClient(env), queueSettingsFromEnv(env));
 console.log(`filas prontas: ${JSON.stringify(queues)}`);

@@ -37,7 +37,7 @@ cp .env.example .env
 docker compose up -d
 docker compose ps          # aguarde "healthy" no postgres
 
-# 4. filas SQS (wager-transactions.fifo, DLQ e wager-events)
+# 4. filas SQS: os nomes vêm do ambiente (padrões: wager-transactions.fifo, DLQ e wager-events)
 bun run localstack:init
 
 # 5. schema do banco de desenvolvimento
@@ -101,14 +101,14 @@ Todas são opcionais. Os padrões estão em `src/config/env.ts` e em `.env.examp
 | `AWS_ENDPOINT_URL`, `AWS_REGION` | `http://localhost:4566`, `us-east-1` | LocalStack |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | `test`, `test` | Credenciais do LocalStack |
 | `WAGER_CONSUMER_ENABLED` | `1` | Liga o consumidor de `wager-transactions.fifo` |
-| `SQS_WAGER_QUEUE`, `SQS_WAGER_DLQ` | `wager-transactions.fifo`, `wager-transactions-dlq.fifo` | Filas de transações |
+| `SQS_WAGER_QUEUE`, `SQS_WAGER_DLQ` | `wager-transactions.fifo`, `wager-transactions-dlq.fifo` | Filas de transações. Precisam terminar em `.fifo`. A inicialização (`localstack:init`) cria as filas com estes mesmos nomes |
 | `SQS_WAIT_SECONDS`, `SQS_MAX_MESSAGES` | `10`, `10` | Long polling e lote |
-| `SQS_MAX_RECEIVE_COUNT` | `5` | Tentativas antes da DLQ |
+| `SQS_MAX_RECEIVE_COUNT` | `5` | Tentativas antes da DLQ. Vale para o consumidor e para a redrive policy do SQS |
 | `SQS_RETRY_BASE_SECONDS`, `SQS_RETRY_MAX_SECONDS` | `5`, `900` | Backoff de retry |
 | `SQS_VISIBILITY_SECONDS` | `60` | Visibilidade ao receber |
 | `SHUTDOWN_GRACE_MS` | `10000` | Tempo de drenagem no SIGTERM |
 | `OUTBOX_POLL_MS`, `OUTBOX_BATCH_SIZE`, `OUTBOX_MAX_BACKOFF_MS` | `500`, `50`, `300000` | Publisher da outbox. `OUTBOX_POLL_MS=0` desliga |
-| `EVENTS_QUEUE_NAME` | `wager-events` | Fila de eventos de integração |
+| `EVENTS_QUEUE_NAME` | `wager-events` | Fila de eventos de integração. Criada pela inicialização com este nome |
 | `PENDING_REFERENCE_POLL_MS` | `1000` | Worker de referências. `0` desliga |
 | `PENDING_REFERENCE_BATCH_SIZE`, `PENDING_REFERENCE_MAX_ATTEMPTS` | `50`, `10` | Lote e limite de tentativas |
 | `PENDING_REFERENCE_TTL_MS` | `86400000` | TTL de uma referência pendente (24h) |
@@ -196,6 +196,7 @@ O servidor calcula tudo a partir do ledger. O corpo da requisição é ignorado.
 - **Entrada:** `wager-transactions.fifo`. Mensagem `WagerTransactionRequested`, com grupo FIFO por `walletId`. Formato na seção 13 do `ARCHITECTURE.md`.
 - **DLQ:** `wager-transactions-dlq.fifo`. Recebe mensagens com JSON ou schema inválido, `OPENING`, wallet inexistente e as que esgotam as tentativas. O atributo `reason` traz o motivo.
 - **Eventos de integração:** `wager-events` (padrão). Entregues at-least-once. Consumidores deduplicam por `eventId`.
+- **Nomes configuráveis:** `localstack:init`, o consumidor e o publisher leem as mesmas variáveis. Trocar um nome no `.env` e rodar `localstack:init` cria as filas novas.
 
 Para testar o consumidor sem a API, envie uma mensagem para `wager-transactions.fifo` com `MessageGroupId` igual ao `walletId`.
 

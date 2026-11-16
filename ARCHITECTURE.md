@@ -279,7 +279,7 @@ A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da
 - `OutboxPublisherWorker`: cada mensagem é tratada em transação própria. Reivindica com `FOR UPDATE SKIP LOCKED`, publica no SQS, marca como publicada e comita.
 - Falha de publicação: `scheduleRetry` com backoff exponencial (base 1s, teto `OUTBOX_MAX_BACKOFF_MS`), na mesma transação.
 - Fila de destino: `wager-events` (padrão, configurável por `EVENTS_QUEUE_NAME`). Fila padrão, não FIFO: a deduplicação é do consumidor, pelo `eventId`.
-- Fila criada por `bun run localstack:init` (`scripts/localstack/init-queues.ts`). `ensureQueues` também cria `wager-transactions.fifo` e a DLQ, com redrive após `MAX_RECEIVE_COUNT` (5).
+- Filas criadas por `bun run localstack:init` (`scripts/localstack/init-queues.ts`). Os nomes e o limite de redrive vêm do ambiente (`queueSettingsFromEnv`), os mesmos que o consumidor e o publisher usam. Ver 16.7.
 
 ### 12.4 Semântica: at-least-once
 - Se o processo morre depois de publicar e antes de marcar, a mensagem continua pendente e é publicada de novo, **com o mesmo `eventId`**.
@@ -331,7 +331,7 @@ A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da
 - Testado: a mensagem em andamento termina (commit e ack), e a que não foi recebida permanece na fila.
 
 ### 13.6 Configuração
-`WAGER_CONSUMER_ENABLED` (padrão 1), `SQS_WAGER_QUEUE`, `SQS_WAGER_DLQ`, `SQS_WAIT_SECONDS`, `SQS_MAX_MESSAGES`, `SQS_MAX_RECEIVE_COUNT`, `SQS_RETRY_BASE_SECONDS`, `SQS_RETRY_MAX_SECONDS`, `SHUTDOWN_GRACE_MS`.
+`WAGER_CONSUMER_ENABLED` (padrão 1), `SQS_WAGER_QUEUE`, `SQS_WAGER_DLQ` (nomes que terminam em `.fifo`), `SQS_WAIT_SECONDS`, `SQS_MAX_MESSAGES`, `SQS_MAX_RECEIVE_COUNT`, `SQS_RETRY_BASE_SECONDS`, `SQS_RETRY_MAX_SECONDS`, `SHUTDOWN_GRACE_MS`.
 
 ### 13.7 Testes
 - `test/integration/messaging/consumer.spec.ts` (10 casos): mensagem válida, entrega duplicada, JSON inválido, schema inválido, OPENING, wallet inexistente, rejeição de negócio, erro transitório até a DLQ, falha após o commit, shutdown com mensagem em andamento.
@@ -423,6 +423,10 @@ Invariante final: `assertLedgerInvariant` (saldo == soma do ledger) roda ao fim 
 - Testes de carga (diferencial opcional, seção 14 do enunciado) não foram implementados.
 
 ## 16. Revisão final: trade-offs, desvios e limitações
+
+### 16.0 Correções da revisão de código
+- **Nomes de filas configuráveis (achado 1).** A inicialização usava constantes fixas, enquanto a aplicação lia o ambiente. Com nomes diferentes, `localstack:init` criava filas que a aplicação não consumia. Agora a inicialização recebe os nomes e o limite do ambiente. Nomes FIFO sem `.fifo` são recusados antes da chamada à AWS. Testado de ponta a ponta com nomes diferentes do padrão, em `test/integration/messaging/queue-names.spec.ts`.
+- **Limite de redrive (mesma família).** O redrive do SQS usava 5 fixo, independentemente de `SQS_MAX_RECEIVE_COUNT`. Agora usa o valor configurado, e o consumidor e o SQS compartilham o mesmo limite.
 
 ### 16.1 Trade-offs conscientes
 - **Lock pessimista por wallet.** Simples e previsível, mas uma wallet quente serializa as operações dela. Sob contenção, a espera passa de 2s e a resposta é 503 com `Retry-After`. Não há perda, e o cliente repete. Alternativa descartada: optimistic locking com retry, que daria retry em massa numa hot wallet.
