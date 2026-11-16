@@ -34,6 +34,11 @@ export class MikroOrmOutboxRepositories implements OutboxRepositories {
     );
   }
 
+  async markOutboxPublished(ids: readonly string[], publishedAt: Date): Promise<void> {
+    if (ids.length === 0) return;
+    await this.em.nativeUpdate(OutboxMessageRecord, { id: { $in: [...ids] } }, { publishedAt });
+  }
+
   async oldestPendingOccurredAt(): Promise<Date | undefined> {
     const record = await this.em.findOne(OutboxMessageRecord, { publishedAt: null }, { orderBy: { occurredAt: 'asc', id: 'asc' } });
     return record?.occurredAt;

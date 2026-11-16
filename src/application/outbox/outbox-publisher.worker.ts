@@ -99,14 +99,14 @@ export class OutboxPublisherWorker {
 
     const outcomes = await this.publishAll(messages);
     const byId = new Map(outcomes.map((o) => [o.eventId, o]));
-    let published = 0;
+    const publishedIds: string[] = [];
     let failed = 0;
 
     for (const message of messages) {
       const outcome = byId.get(message.id);
       if (outcome?.ok) {
         message.markPublished(now);
-        published += 1;
+        publishedIds.push(message.id);
         this.metrics.increment(OUTBOX_PUBLISHED_METRIC, { eventType: message.eventType });
       } else {
         message.scheduleRetry(now, this.options.retryPolicy);
@@ -120,10 +120,12 @@ export class OutboxPublisherWorker {
           nextAttemptAt: message.nextAttemptAt?.toISOString() ?? null,
           reason: outcome?.error ?? 'sem resultado do publisher',
         });
+        await repos.updateOutbox(message);
       }
-      await repos.updateOutbox(message);
     }
-    return { claimed: messages.length, published, failed };
+    // sucessos num único UPDATE; falhas (raras) já foram gravadas uma a uma, com seu agendamento
+    await repos.markOutboxPublished(publishedIds, now);
+    return { claimed: messages.length, published: publishedIds.length, failed };
   }
 
   /** Usa o lote do publisher quando existe; senão publica um a um. Nunca lança: falhas viram resultado. */

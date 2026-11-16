@@ -17,27 +17,27 @@
       "description": "100 wallets, operações aleatórias distribuídas",
       "vus": 64,
       "durationS": 30,
-      "requests": 27212,
-      "throughput": 907,
+      "requests": 29874,
+      "throughput": 995.8,
       "latencyMs": {
-        "p50": 64.5,
-        "p95": 134.8,
-        "p99": 204.1,
-        "max": 436.9,
-        "mean": 70.5
+        "p50": 57.3,
+        "p95": 118.5,
+        "p99": 239.2,
+        "max": 881.9,
+        "mean": 64.3
       },
       "status": {
-        "200": 27212
+        "200": 29874
       },
-      "replays": 1309,
+      "replays": 1474,
       "errorRate": 0,
       "conflictRate": 0,
       "businessRejections": 0,
       "lockConflicts": 0,
       "outbox": {
-        "maxLagS": 21.2,
-        "pendingAtEnd": 34639,
-        "drainS": 23.2
+        "maxLagS": 8.3,
+        "pendingAtEnd": 13773,
+        "drainS": 3.1
       },
       "consistency": {
         "walletsChecked": 100,
@@ -49,26 +49,26 @@
       "description": "1 wallet recebendo todas as operações (pior caso do lock por wallet)",
       "vus": 64,
       "durationS": 30,
-      "requests": 10884,
-      "throughput": 362.8,
+      "requests": 12783,
+      "throughput": 426.1,
       "latencyMs": {
-        "p50": 133,
-        "p95": 354.7,
-        "p99": 431.1,
-        "max": 721.2,
-        "mean": 176.7
+        "p50": 120,
+        "p95": 292.6,
+        "p99": 325.3,
+        "max": 551.8,
+        "mean": 150.2
       },
       "status": {
-        "200": 10884
+        "200": 12783
       },
-      "replays": 574,
+      "replays": 634,
       "errorRate": 0,
       "conflictRate": 0,
       "businessRejections": 0,
       "lockConflicts": 0,
       "outbox": {
-        "maxLagS": 0.9,
-        "pendingAtEnd": 33,
+        "maxLagS": 0.2,
+        "pendingAtEnd": 93,
         "drainS": 0.3
       },
       "consistency": {
@@ -77,5 +77,5 @@
       }
     }
   ],
-  "ranAt": "2026-11-16T11:56:39.225Z"
+  "ranAt": "2026-11-16T13:13:08.439Z"
 }

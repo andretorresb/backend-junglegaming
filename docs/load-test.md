@@ -35,7 +35,7 @@ Tudo roda na mesma máquina: aplicação, banco, LocalStack e gerador disputam C
 
 ## Resultados
 
-Foram duas execuções com os mesmos parâmetros. A primeira revelou um gargalo na outbox. A segunda foi feita depois da correção.
+Mesmos parâmetros em todas as execuções. A primeira revelou o gargalo da publicação um a um. A segunda, com publicação em lote, revelou o da reivindicação com backlog grande. As seguintes medem o índice novo com 4 e 8 faixas.
 
 ### Execução 1: publisher original (uma mensagem por transação)
 
@@ -46,7 +46,7 @@ Foram duas execuções com os mesmos parâmetros. A primeira revelou um gargalo 
 
 Taxa real de publicação: **36 eventos/s**, para uma geração de cerca de 2.000 eventos/s. Ao fim havia 81.781 eventos pendentes.
 
-### Execução 2: publisher em lote (atual)
+### Execução 2: publisher em lote, índice antigo
 
 | Cenário | Req | Req/s | p50 ms | p95 ms | p99 ms | máx ms | Erro | 503 | Replays | Lag máx | Drenagem | Wallets inconsistentes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -54,6 +54,23 @@ Taxa real de publicação: **36 eventos/s**, para uma geração de cerca de 2.00
 | hot-wallet | 10.884 | 363 | 133,0 | 354,7 | 431,1 | 721,2 | 0% | 0% | 574 | 0,9 s | 0,3 s | 0/1 |
 
 Taxa real de publicação: **847 eventos/s**. Todos os 79.932 eventos foram publicados.
+
+### Execuções 3 a 6: índice na ordem de leitura (atual)
+
+Índice `outbox_pending_order_idx` e sucessos marcados num único `UPDATE`. Duas execuções com 4 faixas e duas com 8 (padrão atual). Os 422 e os 503 seguem em zero.
+
+| Faixas | Cenário | Req/s | p50 ms | p99 ms | Erro | Lag máx | Drenagem | Wallets inconsistentes |
+|---|---|---|---|---|---|---|---|---|
+| 4 | distributed | 1.024 | 56,7 | 217,5 | 0% | 12,7 s | 4,9 s | 0/100 |
+| 4 | distributed | 1.174 | 50,0 | 150,1 | 0% | 13,3 s | 5,8 s | 0/100 |
+| 8 | distributed | 1.119 | 53,4 | 170,6 | 0% | 7,3 s | 4,1 s | 0/100 |
+| 8 | distributed | 996 | 57,3 | 239,2 | 0% | 8,3 s | 3,1 s | 0/100 |
+| 4 | hot-wallet | 421 | 107,5 | 390,0 | 0% | 0,2 s | 0,3 s | 0/1 |
+| 4 | hot-wallet | 410 | 97,5 | 418,7 | 0% | 0,2 s | 0,3 s | 0/1 |
+| 8 | hot-wallet | 435 | 97,6 | 384,1 | 0% | 0,2 s | 0,3 s | 0/1 |
+| 8 | hot-wallet | 426 | 120,0 | 325,3 | 0% | 0,2 s | 0,3 s | 0/1 |
+
+O `load-test-results.json` é da última execução (8 faixas).
 
 Nos dois cenários e nas duas execuções: nenhum 422, nenhum 503, nenhum conflito de lock registrado (`lock_conflicts_total = 0`).
 
@@ -72,9 +89,14 @@ Nos dois cenários e nas duas execuções: nenhum 422, nenhum 503, nenhum confli
   - ciclo seguido, sem esperar o intervalo, enquanto o lote vem cheio.
 - **Efeito:** de 36 para 847 eventos/s, cerca de 23 vezes mais. A semântica at-least-once continua a mesma, e falha de um evento dentro do lote só reagenda aquele evento.
 
+### Segundo gargalo: reivindicação com backlog grande
+- **Causa:** o índice da outbox era `(next_attempt_at, occurred_at, id)`, que não serve ao `ORDER BY occurred_at, id` da reivindicação. Com 80 mil pendentes, cada lote de 10 fazia uma varredura sequencial e ordenava tudo em disco: `EXPLAIN ANALYZE` mediu 481 ms. Quanto maior o backlog, mais lenta a publicação, que é o pior comportamento possível sob carga.
+- **Correção:** índice parcial `(occurred_at, id) WHERE published_at IS NULL` (migration `Migration20261116120000_outbox_pending_order`). A mesma consulta passou a 0,07 ms, uma varredura de índice que para no `LIMIT`. A consulta do lag também usa o índice. Os sucessos de cada lote passaram a ser marcados num único `UPDATE`, em vez de um por mensagem.
+- **Efeito:** com 4 faixas, o lag máximo caiu de 21 para cerca de 13 s, e a drenagem de 23 para cerca de 5 s. Com 8 faixas, o lag ficou entre 7 e 8 s nas duas execuções. Por isso o padrão passou a 8.
+
 ### O que ainda não está bom
-- **No cenário distribuído, a outbox ainda fica para trás durante a carga máxima.** A geração estimada é de cerca de 1.650 eventos/s (907 req/s, quase todas com 2 eventos), contra 847 publicados/s. O lag cresceu até 21 s e drenou em 23 s depois que a carga parou. Sob a carga da wallet quente (cerca de 700 eventos/s), a publicação acompanha, com lag abaixo de 1 s.
-- **O throughput da API caiu de 1.135 para 907 req/s no cenário distribuído** na segunda execução. A hipótese, não verificada, é a disputa por recursos: as 4 faixas do publisher ocupam até 4 das 10 conexões do pool de cada processo, e tudo roda na mesma máquina. Separar o publisher em processo próprio, ou aumentar o pool, são os próximos passos para testar essa hipótese.
+- **No cenário distribuído, a outbox ainda atrasa durante a carga máxima.** A geração é de cerca de 2.000 eventos/s. O lag chega a 7 ou 8 s, e o backlog drena em 3 a 4 s quando a carga para, a cerca de 5.000 eventos/s. Ou seja, o publisher sozinho é mais rápido que a geração; durante a carga ele disputa CPU e conexões com a API, o banco, o LocalStack e o gerador, todos na mesma máquina. O próximo passo seria rodar o publisher em processo próprio. Sob a carga da wallet quente, a publicação acompanha, com lag de 0,2 s.
+- **O throughput da API varia bastante entre execuções** (de 996 a 1.174 req/s no cenário distribuído, com a mesma configuração). Não há diferença clara entre 4 e 8 faixas, e a queda para 907 req/s na execução 2 não se repetiu depois do índice: era, ao menos em parte, efeito da reivindicação lenta.
 - **A latência da wallet quente piorou na cauda** (p99 de 281 para 431 ms), enquanto a mediana melhorou (178 para 133 ms). Com uma execução de cada, não dá para separar o efeito da mudança da variação entre execuções.
 
 ### Wallet quente
@@ -83,9 +105,9 @@ Nos dois cenários e nas duas execuções: nenhum 422, nenhum 503, nenhum confli
 
 ## Limitações do experimento
 
-- **Uma execução por configuração.** Não há média nem desvio entre execuções, então diferenças pequenas de latência não são conclusivas.
+- **Poucas execuções.** No máximo duas por configuração. A variação entre execuções iguais (cerca de 15% no throughput) é maior que várias das diferenças medidas, então só o efeito no lag, que se repetiu, é conclusivo.
 - **Gerador no mesmo host.** O gerador disputa CPU com a aplicação e o banco. Os números são um limite inferior do que a aplicação faria com o gerador em outra máquina.
-- **LocalStack não é SQS.** A latência e os limites de vazão do SQS real são outros. O número de 847 eventos/s vale para este ambiente.
+- **LocalStack não é SQS.** A latência e os limites de vazão do SQS real são outros. As taxas de publicação valem para este ambiente.
 - **Docker Desktop no macOS.** A rede entre containers e host passa por uma VM, o que acrescenta latência.
 - **Só a API HTTP.** O consumidor da fila `wager-transactions.fifo` não foi submetido a carga.
 - **Janelas curtas** (30 s). Efeitos de longo prazo, como o crescimento da inbox e da outbox, não aparecem.
@@ -99,4 +121,4 @@ bun run test:load
 ```
 
 Parâmetros: `LOAD_PROCESSES` (3), `LOAD_VUS` (64), `LOAD_DURATION_S` (30), `LOAD_WARMUP_S` (5),
-`LOAD_WALLETS` (100), `LOAD_DUPLICATE_RATIO` (0.05). Faixas do publisher: `OUTBOX_PARALLELISM` (4).
+`LOAD_WALLETS` (100), `LOAD_DUPLICATE_RATIO` (0.05). Faixas do publisher: `OUTBOX_PARALLELISM` (8).

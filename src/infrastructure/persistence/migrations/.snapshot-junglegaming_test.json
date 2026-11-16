@@ -253,16 +253,15 @@
         },
         {
           "columnNames": [
-            "next_attempt_at",
             "occurred_at",
             "id"
           ],
           "composite": true,
           "constraint": false,
-          "keyName": "outbox_pending_idx",
+          "keyName": "outbox_pending_order_idx",
           "unique": false,
           "primary": false,
-          "expression": "CREATE INDEX outbox_pending_idx ON public.outbox_messages USING btree (next_attempt_at, occurred_at, id) WHERE (published_at IS NULL)"
+          "expression": "CREATE INDEX outbox_pending_order_idx ON public.outbox_messages USING btree (occurred_at, id) WHERE (published_at IS NULL)"
         }
       ],
       "checks": [

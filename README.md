@@ -110,7 +110,7 @@ Todas são opcionais. Os padrões estão em `src/config/env.ts` e em `.env.examp
 | `SQS_VISIBILITY_SECONDS` | `60` | Visibilidade ao receber |
 | `SHUTDOWN_GRACE_MS` | `10000` | Tempo de drenagem no SIGTERM |
 | `OUTBOX_POLL_MS`, `OUTBOX_BATCH_SIZE`, `OUTBOX_MAX_BACKOFF_MS` | `500`, `50`, `300000` | Publisher da outbox. `OUTBOX_POLL_MS=0` desliga |
-| `OUTBOX_PARALLELISM` | `4` | Faixas de publicação em paralelo por processo (lotes de 10 com `SendMessageBatch`) |
+| `OUTBOX_PARALLELISM` | `8` | Faixas de publicação em paralelo por processo (lotes de 10 com `SendMessageBatch`) |
 | `EVENTS_QUEUE_NAME` | `wager-events` | Fila de eventos de integração. Criada pela inicialização com este nome |
 | `PENDING_REFERENCE_POLL_MS` | `1000` | Worker de referências. `0` desliga |
 | `PENDING_REFERENCE_BATCH_SIZE`, `PENDING_REFERENCE_MAX_ATTEMPTS` | `50`, `10` | Lote e limite de tentativas |

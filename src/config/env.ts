@@ -91,7 +91,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
       batchSize: parseIntEnv(source['OUTBOX_BATCH_SIZE'], 50, 'OUTBOX_BATCH_SIZE'),
       maxBackoffMs: parseIntEnv(source['OUTBOX_MAX_BACKOFF_MS'], 300_000, 'OUTBOX_MAX_BACKOFF_MS'),
       queueName: source['EVENTS_QUEUE_NAME'] ?? 'wager-events',
-      parallelism: parseIntEnv(source['OUTBOX_PARALLELISM'], 4, 'OUTBOX_PARALLELISM'),
+      parallelism: parseIntEnv(source['OUTBOX_PARALLELISM'], 8, 'OUTBOX_PARALLELISM'),
     },
     pendingReference: {
       pollMs: parseIntEnv(source['PENDING_REFERENCE_POLL_MS'], 1000, 'PENDING_REFERENCE_POLL_MS', 0),
