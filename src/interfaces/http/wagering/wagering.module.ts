@@ -9,6 +9,9 @@ import type { Clock } from '../../../application/ports/clock';
 import { loadEnv } from '../../../config/env';
 import { MikroOrmWagerUnitOfWork } from '../../../infrastructure/persistence/wagering.persistence';
 import { WagerTransactionQueries } from '../../../infrastructure/persistence/wagering.queries';
+import { WalletQueries } from '../../../infrastructure/persistence/wallet.queries';
+import { JsonLogger } from '../../../infrastructure/observability/json-logger';
+import { InMemoryMetrics } from '../../../infrastructure/observability/in-memory-metrics';
 import { SystemClock } from '../../../infrastructure/time/system-clock';
 import type { ReferenceRetryPolicy } from '../../../domain/wagering/reference-retry-policy';
 import { PendingReferenceScheduler } from '../../workers/pending-reference.scheduler';
@@ -22,6 +25,9 @@ import {
   PROCESS_WAGER_TRANSACTION,
   RETRY_POLICY,
   WAGER_TRANSACTION_QUERIES,
+  LOGGER,
+  METRICS,
+  WALLET_QUERIES,
 } from './wagering.tokens';
 
 export const CLOCK = Symbol('CLOCK');
@@ -78,6 +84,13 @@ const logWorker = (entry: WorkerLogEntry): void => {
       provide: WAGER_TRANSACTION_QUERIES,
       inject: [EntityManager],
       useFactory: (em: EntityManager) => new WagerTransactionQueries(em),
+    },
+    { provide: LOGGER, useFactory: () => new JsonLogger(loadEnv().serviceName) },
+    { provide: METRICS, useFactory: () => new InMemoryMetrics() },
+    {
+      provide: WALLET_QUERIES,
+      inject: [EntityManager, METRICS, LOGGER],
+      useFactory: (em: EntityManager, metrics: InMemoryMetrics, logger: JsonLogger) => new WalletQueries(em, metrics, logger),
     },
     { provide: APP_FILTER, useClass: ApplicationErrorFilter },
     {

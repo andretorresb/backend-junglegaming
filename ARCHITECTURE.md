@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 5 (referências fora de ordem)**.
+Estado atual: **Etapa 6 (API HTTP)**.
 
 ## 1. Stack
 
@@ -229,6 +229,37 @@ A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da
 - `test/unit/domain/reference-retry-policy.spec.ts`: backoff, teto, jitter, limite e TTL.
 - `test/integration/wagering/pending-reference.spec.ts`: 10 casos, incluindo a cadeia ROLLBACK → REFUND → BET, referência que nunca chega, TTL, valor divergente, saldo gasto e falha transitória isolada.
 - `test/concurrency/pending-reference-concurrency.spec.ts`: 50 reversões pendentes drenadas por dois workers em paralelo, sem duplicidade.
+
+## 11. API HTTP completa (Etapa 6)
+
+### 11.1 Autenticação (seção 2 do enunciado)
+- **Decisão:** não integrar IdP nesta entrega. O enunciado aceita essa escolha, desde que o ponto de extensão fique explícito e documentado.
+- `AuthGuard` (`src/interfaces/http/auth/auth.guard.ts`) é registrado globalmente e hoje deixa tudo passar. A troca por validação real de token (Keycloak ou Zitadel) acontece nesse guard, sem mudar os controllers.
+- Health checks são marcados com `@Public()`. São abertos mesmo quando o guard for real.
+- Escopo: mensagens da fila são canal interno confiável, mas a identidade do provedor no payload continua sujeita às validações de domínio (jogador, moeda, referência).
+
+### 11.2 Consultas e ledger
+- `GET /wallets/:id`, `GET /wallets/:id/ledger` e `POST /wallets/:id/reconciliation` estão implementados em `WalletQueries`.
+- **Cursor do ledger:** base64url de `{ t, i }`, onde `t` é o `created_at` do último item e `i` o id. Ordenação `(created_at, id)`. Cursor adulterado é 400.
+- **Estabilidade:** `created_at` é sempre gravado a partir de `Date` do JavaScript (precisão de milissegundos). O valor que volta do banco é exato, então o cursor não repete nem pula linhas. O teste de paginação com inserções concorrentes comprova isso.
+- **Limitação:** uma transação de longa duração que commita um lançamento com `created_at` anterior ao cursor pode fazer esse item ser entregue fora de ordem ou não ser entregue na paginação em curso. O ledger é lido em páginas independentes, então a limitação se restringe a paginações abertas durante escrita concorrente.
+
+### 11.3 Reconciliação
+- O servidor calcula tudo. Saldos enviados pelo cliente são ignorados (a rota não tem corpo validado).
+- Leitura em `REPEATABLE READ`: o saldo armazenado e a soma do ledger vêm do mesmo snapshot.
+- Divergência: `consistent: false`, `difference` preenchido, log de erro `reconciliation_divergence` e métrica `reconciliation_divergence_total`. Nada é corrigido.
+
+### 11.4 Health
+- `/health/live`: sem IO.
+- `/health/ready`: PostgreSQL (`select 1`) e SQS (`ListQueues`) em paralelo, timeout de 3s por dependência. Falha em qualquer uma → 503 com `checks` e `errors`.
+- Timeout de 3s, e não 1s: a primeira chamada a uma dependência fria (pool, SDK) pode passar de 2s. Um probe que dá falso negativo no boot é pior que um probe um pouco mais lento.
+
+### 11.5 Contrato
+- Status por situação e lista de endpoints em `docs/http-contract.md`.
+
+### 11.6 Testes
+- `test/integration/wallets/queries.spec.ts`: consultas, paginação de 120 itens, limite, cursor inválido, paginação com inserções concorrentes, reconciliação consistente e divergente (com métrica), e wallet inexistente.
+- `test/integration/health/ready.spec.ts`: ready 200 com PostgreSQL e SQS; ready 503 com SQS inalcançável, live continua 200.
 
 ## 11. Pendências desta documentação
 
