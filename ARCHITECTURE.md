@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Documento vivo. Cada decisão relevante é registrada aqui com motivo, alternativas e trade-offs.
-Estado atual: **Etapa 10 (testes de integração e concorrência)**.
+Estado atual: **Etapa 11 (entrega). Documento final.** Revisado contra o enunciado (seções 5 e 14).
 
 ## 1. Stack
 
@@ -12,7 +12,7 @@ Estado atual: **Etapa 10 (testes de integração e concorrência)**.
 | Framework | NestJS 11 | Adotado |
 | ORM | MikroORM 6 (PostgreSQL) | Adotado — ver seção 2 |
 | Banco | PostgreSQL 16 | Adotado |
-| Mensageria | AWS SQS via LocalStack 3.8 | Adotado (uso a partir da Etapa 7) |
+| Mensageria | AWS SQS via LocalStack 3.8 | Adotado |
 | Orquestração local | Docker Compose | Adotado |
 
 ## 2. Escolha do ORM: MikroORM
@@ -30,11 +30,11 @@ Estado atual: **Etapa 10 (testes de integração e concorrência)**.
 
 ## 3. Autenticação
 
-**Status:** pendente de decisão, a registrar até a Etapa 6.
+**Decisão:** não integrar IdP nesta entrega. `AuthGuard` no-op é o ponto de extensão. Detalhes na seção 11.1.
 
-Opções:
-- Integrar IdP externo (Keycloak ou Zitadel) em Docker Compose.
-- Não implementar, documentar o desenho e deixar `AuthGuard` no-op e `ProviderIdentityPort` como pontos de extensão.
+Alternativas consideradas:
+- Integrar IdP externo (Keycloak ou Zitadel) em Docker Compose. Não feito por custo de operação local e porque o enunciado aceita a não implementação com ponto de extensão explícito.
+- Tabela própria de usuários com hash de senha: descartada pelo enunciado.
 
 Escopo: endpoints de health ficam abertos. Mensagens da fila são canal interno confiável, mas a identidade do provedor no payload continua sujeita às validações de domínio.
 
@@ -46,7 +46,7 @@ Escopo: endpoints de health ficam abertos. Mensagens da fila são canal interno 
 ## 5. Health checks
 
 - `GET /health/live`: processo vivo, sem IO, sem autenticação. **Implementado.**
-- `GET /health/ready`: Postgres e SQS alcançáveis. **Pendente (Etapa 6).**
+- `GET /health/ready`: PostgreSQL, SQS e estado de drenagem. **Implementado** (seção 11.4).
 
 ## 6. Domínio (Etapa 1)
 
@@ -151,7 +151,7 @@ Se duas requisições com chaves diferentes e o mesmo `(provider, externalTransa
 - Kinds suportados: `BET`, `WIN`, `LOSS`.
 - `OPENING`: recusado com 400 `INTERNAL_ONLY_KIND` (interno).
 - `REFUND` e `ROLLBACK`: 501 `KIND_NOT_SUPPORTED_YET`. Implementados na Etapa 4.
-- Eventos gravados na outbox com envelope provisório (`eventId`, `eventType`, `aggregateId`, `correlationId`, `occurredAt`, `version`, `data`). A forma final, com classes `IntegrationEvent`, chega na Etapa 7.
+- Eventos gravados na outbox na mesma transação. Desde a Etapa 7 são classes `IntegrationEvent` (seção 12).
 - Publicação no SQS: fora de escopo (Etapa 7).
 
 ### 8.7 Testes
@@ -422,11 +422,71 @@ Invariante final: `assertLedgerInvariant` (saldo == soma do ledger) roda ao fim 
 - A reinicialização do serviço é testada com SIGTERM e SIGKILL reais. Não há reinício de LocalStack nem de PostgreSQL durante a suíte.
 - Testes de carga (diferencial opcional, seção 14 do enunciado) não foram implementados.
 
-## 12. Pendências desta documentação
+## 16. Revisão final: trade-offs, desvios e limitações
 
-Serão preenchidas nas etapas seguintes conforme o plano em `ETAPAS.md` e as specs em `docs/specs/`:
-- Estratégia de lock e idempotência (Etapa 3).
-- Política de referências pendentes (Etapa 5).
-- Mapeamento HTTP (Etapa 6).
-- Outbox, inbox e semântica at-least-once (Etapas 7 e 8).
-- Trade-offs e limitações (Etapa 11).
+### 16.1 Trade-offs conscientes
+- **Lock pessimista por wallet.** Simples e previsível, mas uma wallet quente serializa as operações dela. Sob contenção, a espera passa de 2s e a resposta é 503 com `Retry-After`. Não há perda, e o cliente repete. Alternativa descartada: optimistic locking com retry, que daria retry em massa numa hot wallet.
+- **Idempotência no banco, sem cache.** O `UNIQUE` e o lock de wallet garantem o efeito único. Custo: uma consulta extra por requisição.
+- **Replay devolve o saldo observado** (`balance_observed`). Custo: uma coluna a mais em `wager_transactions`.
+- **Eventos at-least-once.** A duplicidade na fila de eventos é esperada depois de falha. Quem consome deduplica por `eventId`. Alternativa descartada: exactly-once na fila, que exigiria transação distribuída.
+- **Inbox e outbox na mesma transação do efeito.** Garante atomicidade local, sem XA. Custo: a inbox cresce sem limite. Não há rotina de limpeza nesta entrega.
+- **`ON CONFLICT DO NOTHING` na inbox.** A duplicata vira resultado, e não exceção, para não abortar a transação do PostgreSQL.
+- **Métricas em formato Prometheus próprio** (sem `prom-client`). Superfície pequena e formato estável. Custo: sem histogramas com labels dinâmicos e sem exemplars.
+
+### 16.2 Desvios conscientes da spec
+1. **Regra 4 (reversão única).** O enunciado diz "mesmo tipo de operação". Adotei **uma reversão processada por transação**, qualquer que seja o tipo, para não duplicar créditos. Seção 9.4.
+2. **Espera encadeada.** ROLLBACK de um REFUND pendente aguarda, em vez de ser rejeitado. Seção 10.4.
+3. **Rejeição por moeda ou jogador não é persistida.** A FK composta impede o registro. Respondo 422 sem auditoria no banco. Seção 8.4.
+4. **`OPENING` gera `WagerTransactionProcessed`**, porque o enunciado diz que qualquer transação aplicada gera esse evento.
+5. **Fila de eventos `wager-events`** além das duas filas do enunciado. Nela são publicados os eventos da seção 11.
+6. **`referenceExternalTransactionId` no corpo da mensagem da fila.** Necessário para REFUND e ROLLBACK, não aparece no exemplo do enunciado. Seção 13.1.
+7. **`POST /wallets` sem `Idempotency-Key`.** A unicidade do banco responde 409. Seção 9.1.
+8. **Wallet inexistente na fila vai para a DLQ** (permanente), e não é repetida. Seção 13.4.
+
+### 16.3 Limitações conhecidas
+- **Autenticação não integrada.** Qualquer chamada passa pelo guard no-op. A identidade do provedor é validada apenas pelas regras de domínio.
+- **Paginação do ledger com escrita concorrente.** Um item commitado com `created_at` anterior ao cursor pode não aparecer na paginação em curso. Seção 11.2.
+- **Reconciliação só detecta.** Não corrige. Decisão operacional.
+- **Inbox e outbox sem retenção.** Crescem sem limite. Ficaria para uma rotina de limpeza.
+- **Sem load test.** O diferencial opcional da seção 14 não foi implementado.
+- **Publicação duplicada da outbox testada com falha simulada**, não com morte real do publisher. A morte real é testada para o consumidor.
+- **`FAULT_CRASH_AFTER_COMMIT` existe no código de produção**, desligado por padrão. Serve só para teste de recuperação.
+- **OpenTelemetry não implementado.** As portas `Logger` e `Metrics` permitem trocar a implementação.
+- **Sem replicação de LocalStack e PostgreSQL** nos testes de falha. Só o processo da aplicação é morto.
+
+### 16.4 Restrições invioláveis (seção 5 do enunciado): evidência
+
+| # | Restrição | Como é garantida | Evidência |
+|---|---|---|---|
+| 1 | Sem `number`/`float`/`double` para dinheiro | `Money` com decimal.js; colunas `numeric(19,2)`; `number` só em `version` (inteiro) | `src/domain/money/money.ts`; teste de arquitetura em `test/unit/domain/architecture.spec.ts` |
+| 2 | Sem cache em memória como idempotência | `UNIQUE (idempotency_key)` e consulta à tabela dentro da transação | `constraints.spec.ts`; `process-wager-transaction.spec.ts` |
+| 3 | Não confiar só no SQS FIFO | Lock e constraints no banco; a fila é otimização | `consumer-concurrency.spec.ts` (entregas duplicadas) |
+| 4 | Não publicar antes do commit | Outbox na mesma transação; publisher lê só linhas comitadas | `atomicity.spec.ts`; `outbox-publisher.spec.ts` |
+| 5 | Ledger não é sobrescrito nem excluído | Trigger `BEFORE UPDATE OR DELETE` | `constraints.spec.ts` (UPDATE e DELETE bloqueados) |
+| 6 | Sem lock global | `FOR UPDATE` por `walletId` | `wagering-concurrency.spec.ts` (wallets distintas em paralelo) |
+| 7 | Sem `read → calculate → update` sem controle | Lock pessimista e guarda de versão no `UPDATE` | `saveWallet` em `wagering.persistence.ts`; concorrência de saldo |
+| 8 | Correto com múltiplas instâncias | Processos reais, três instâncias | `multi-process.spec.ts` |
+| 9 | Garantias no schema, não só no código | Constraints e FKs compostas nas migrations | `test/integration/schema/` |
+
+### 16.5 Falhas eliminatórias (seção 14 do enunciado): evidência
+
+| Falha | Situação |
+|---|---|
+| `number` para dinheiro | Não ocorre (seção 16.4, item 1) |
+| Saldo negativo causado por race | Não ocorre: teste de disputa 80 + 80 e 30 apostas em 3 processos |
+| Débito ou crédito duplicado | Não ocorre: 50 requisições idênticas e entregas duplicadas geram um efeito |
+| Idempotência só em memória | Não ocorre (seção 16.4, item 2) |
+| Solução correta só com uma instância | Não ocorre: testes com três processos |
+| Publicação de evento antes do commit | Não ocorre: outbox na transação |
+| Ausência de ledger auditável | Não ocorre: ledger imutável, um lançamento por transação e wallet |
+| Testes que substituem PostgreSQL e SQS por mock | Não ocorre: testes contra PostgreSQL e LocalStack reais; não há mock de banco nem de fila |
+
+### 16.6 Pontos da avaliação (seção 14 do enunciado): onde estão
+- **Correção financeira:** `Money`, ledger imutável, reversões (seção 9), reconciliação (seção 11.3).
+- **Concorrência:** lock por wallet (seção 8.1), testes de disputa e de múltiplas instâncias.
+- **Idempotência:** seção 8.2 e 8.3; replay com saldo observado.
+- **Mensageria e falhas:** inbox, outbox, DLQ, redelivery, shutdown (seções 12 e 13).
+- **Modelagem e arquitetura:** domínio puro (`src/domain`), portas (`src/application/ports`), adaptadores (`src/infrastructure`), interfaces (`src/interfaces`).
+- **Testes:** seção 15.
+- **Observabilidade:** seção 14 e `docs/runbook.md`.
+- **Documentação:** `README.md` (setup e comandos), este arquivo, `docs/http-contract.md` e `docs/failure-codes.md`.
