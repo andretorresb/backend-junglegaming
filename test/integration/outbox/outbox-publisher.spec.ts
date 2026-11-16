@@ -142,6 +142,26 @@ describe('Outbox — escrita atômica e publicação no SQS', () => {
     expect(await pendingCount()).toBe(0);
   });
 
+  it('lote com sucesso parcial: só a mensagem que falhou volta para retry', async () => {
+    const clock = mutableClock(START);
+    const w = await seedWallet(client, { balance: '100.00' });
+    await useCase(em, clock).execute(command({ walletId: w.walletId, playerId: w.playerId, amount: '25.00', externalTransactionId: 'bet-partial' }));
+    const ids = (await client.query<{ id: string }>('SELECT id FROM outbox_messages ORDER BY occurred_at, id')).rows.map((r) => r.id);
+    const failing = ids[0]!;
+
+    const partial: EventPublisher = {
+      publish: async () => { throw new Error('não deveria ser chamado: o lote existe'); },
+      publishBatch: async (events) => events.map((e) => (e.eventId === failing ? { eventId: e.eventId, ok: false, error: 'rejeitado' } : { eventId: e.eventId, ok: true })),
+    };
+    const stats = await publisher(partial, clock).runCycle(10);
+
+    expect(stats).toEqual({ claimed: 2, published: 1, failed: 1 });
+    const rows = await client.query<{ id: string; attempts: number; published: boolean }>('SELECT id, attempts, published_at IS NOT NULL AS published FROM outbox_messages');
+    const byId = new Map(rows.rows.map((r) => [r.id, r]));
+    expect(byId.get(failing)).toMatchObject({ attempts: 1, published: false });
+    expect(byId.get(ids[1]!)).toMatchObject({ attempts: 0, published: true });
+  });
+
   it('expõe o lag: idade, em segundos, da mensagem pendente mais antiga', async () => {
     const clock = mutableClock(START);
     const w = await seedWallet(client, { balance: '100.00' });

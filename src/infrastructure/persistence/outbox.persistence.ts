@@ -8,8 +8,8 @@ import { translateInfrastructureError } from './wagering.persistence';
 export class MikroOrmOutboxRepositories implements OutboxRepositories {
   constructor(private readonly em: EntityManager) {}
 
-  async claimDueOutbox(now: Date, excludedIds: readonly string[]): Promise<OutboxMessage | undefined> {
-    const record = await this.em.findOne(
+  async claimDueOutboxBatch(now: Date, limit: number, excludedIds: readonly string[]): Promise<OutboxMessage[]> {
+    const records = await this.em.find(
       OutboxMessageRecord,
       {
         publishedAt: null,
@@ -18,10 +18,11 @@ export class MikroOrmOutboxRepositories implements OutboxRepositories {
       },
       {
         orderBy: { occurredAt: 'asc', id: 'asc' },
+        limit,
         lockMode: LockMode.PESSIMISTIC_PARTIAL_WRITE,
       },
     );
-    return record ? outboxFromRecord(record) : undefined;
+    return records.map(outboxFromRecord);
   }
 
   async updateOutbox(message: OutboxMessage): Promise<void> {

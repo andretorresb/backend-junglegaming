@@ -7,4 +7,6 @@ coverage/
 *.log
 .DS_Store
 .idea/
+# snapshot do migrator gerado pelo banco do teste de carga
+src/infrastructure/persistence/migrations/.snapshot-junglegaming_load.json
 .vscode/

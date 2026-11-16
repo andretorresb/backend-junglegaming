@@ -17,7 +17,14 @@ export class OutboxPublisherScheduler implements OnApplicationBootstrap, OnModul
     @Inject(OUTBOX_PUBLISHER) worker: OutboxPublisherWorker,
     @Inject(OUTBOX_SCHEDULE) schedule: OutboxSchedule,
   ) {
-    this.task = new PeriodicTask('OutboxPublisher', schedule.pollMs, () => worker.runCycle(schedule.batchSize));
+    // Enquanto o ciclo encher o lote, há fila: roda de novo sem esperar o intervalo (limite de 20 ciclos
+    // seguidos, para o shutdown não ficar esperando um backlog grande).
+    this.task = new PeriodicTask('OutboxPublisher', schedule.pollMs, async () => {
+      for (let i = 0; i < 20; i++) {
+        const stats = await worker.runCycle(schedule.batchSize);
+        if (stats.claimed < schedule.batchSize) break;
+      }
+    });
   }
 
   onApplicationBootstrap(): void {

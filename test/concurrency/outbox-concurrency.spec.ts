@@ -83,6 +83,29 @@ describe('Concorrência — publishers sobre a mesma outbox', () => {
     expect(attempts.rowCount).toBe(0);
   }, 120_000);
 
+  it('faixas paralelas no mesmo processo (4) e dois processos: cada evento chega uma vez', async () => {
+    const clock = mutableClock(START);
+    const total = await fillOutbox(clock, 100);
+    const real = new SqsEventPublisher(sqs, EVENTS_QUEUE);
+    const parallel = () =>
+      new OutboxPublisherWorker(new MikroOrmOutboxUnitOfWork(em), real, clock, new MetricsRegistry(), silent, {
+        retryPolicy: { baseDelayMs: 1000, maxDelayMs: 8000 },
+        parallelism: 4,
+      });
+    const workers = [parallel(), parallel()];
+    let claimed = 1;
+    for (let round = 0; round < 50 && claimed > 0; round++) {
+      const results = await Promise.all(workers.map((w) => w.runCycle(50)));
+      claimed = results.reduce((sum, r) => sum + r.claimed, 0);
+    }
+
+    const received = await drainQueue(sqs, EVENTS_QUEUE);
+    expect(received).toHaveLength(total);
+    expect(new Set(received.map((m) => m.eventId)).size).toBe(total);
+    const pending = await client.query('SELECT 1 FROM outbox_messages WHERE published_at IS NULL OR attempts > 0');
+    expect(pending.rowCount).toBe(0);
+  }, 120_000);
+
   it('publicação que falha depois de enviar: o mesmo eventId é reenviado, e só ele aparece duplicado', async () => {
     const clock = mutableClock(START);
     await fillOutbox(clock, 5); // 10 eventos

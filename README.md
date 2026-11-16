@@ -7,6 +7,7 @@ Desafio técnico da Jungle Gaming.
 - **Contrato HTTP:** [`docs/http-contract.md`](./docs/http-contract.md)
 - **Códigos de falha:** [`docs/failure-codes.md`](./docs/failure-codes.md)
 - **Operação e diagnóstico:** [`docs/runbook.md`](./docs/runbook.md)
+- **Teste de carga:** [`docs/load-test.md`](./docs/load-test.md)
 - **Plano e specs por etapa:** [`ETAPAS.md`](./ETAPAS.md), [`docs/specs/`](./docs/specs/)
 
 ## Stack
@@ -81,6 +82,7 @@ desenvolvimento não é alterado. Os testes desligam os agendadores automáticos
 | `bun run test:integration` | Testes de integração (PostgreSQL e LocalStack reais) |
 | `bun run test:concurrency` | Testes de concorrência e de processos |
 | `bun run test` | Todos os testes |
+| `bun run test:load` | Teste de carga com 3 processos (resultados e análise em [`docs/load-test.md`](./docs/load-test.md)) |
 | `bun run localstack:init` | Cria as filas no LocalStack |
 | `bun run migration:up` | Aplica migrations pendentes |
 | `bun run migration:down` | Reverte a última migration |
@@ -108,6 +110,7 @@ Todas são opcionais. Os padrões estão em `src/config/env.ts` e em `.env.examp
 | `SQS_VISIBILITY_SECONDS` | `60` | Visibilidade ao receber |
 | `SHUTDOWN_GRACE_MS` | `10000` | Tempo de drenagem no SIGTERM |
 | `OUTBOX_POLL_MS`, `OUTBOX_BATCH_SIZE`, `OUTBOX_MAX_BACKOFF_MS` | `500`, `50`, `300000` | Publisher da outbox. `OUTBOX_POLL_MS=0` desliga |
+| `OUTBOX_PARALLELISM` | `4` | Faixas de publicação em paralelo por processo (lotes de 10 com `SendMessageBatch`) |
 | `EVENTS_QUEUE_NAME` | `wager-events` | Fila de eventos de integração. Criada pela inicialização com este nome |
 | `PENDING_REFERENCE_POLL_MS` | `1000` | Worker de referências. `0` desliga |
 | `PENDING_REFERENCE_BATCH_SIZE`, `PENDING_REFERENCE_MAX_ATTEMPTS` | `50`, `10` | Lote e limite de tentativas |

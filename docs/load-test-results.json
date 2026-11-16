@@ -1,0 +1,81 @@
+{
+  "environment": {
+    "machine": "Apple M3 · 8 núcleos · 8 GB",
+    "os": "darwin 27.0.0",
+    "bun": "1.4.4",
+    "postgres": "?",
+    "processes": 3,
+    "vus": 64,
+    "warmupS": 5,
+    "durationS": 30,
+    "duplicateRatio": 0.05,
+    "generator": "mesmo host da aplicação e do banco (Bun fetch, laço fechado)"
+  },
+  "results": [
+    {
+      "name": "distributed",
+      "description": "100 wallets, operações aleatórias distribuídas",
+      "vus": 64,
+      "durationS": 30,
+      "requests": 27212,
+      "throughput": 907,
+      "latencyMs": {
+        "p50": 64.5,
+        "p95": 134.8,
+        "p99": 204.1,
+        "max": 436.9,
+        "mean": 70.5
+      },
+      "status": {
+        "200": 27212
+      },
+      "replays": 1309,
+      "errorRate": 0,
+      "conflictRate": 0,
+      "businessRejections": 0,
+      "lockConflicts": 0,
+      "outbox": {
+        "maxLagS": 21.2,
+        "pendingAtEnd": 34639,
+        "drainS": 23.2
+      },
+      "consistency": {
+        "walletsChecked": 100,
+        "inconsistent": 0
+      }
+    },
+    {
+      "name": "hot-wallet",
+      "description": "1 wallet recebendo todas as operações (pior caso do lock por wallet)",
+      "vus": 64,
+      "durationS": 30,
+      "requests": 10884,
+      "throughput": 362.8,
+      "latencyMs": {
+        "p50": 133,
+        "p95": 354.7,
+        "p99": 431.1,
+        "max": 721.2,
+        "mean": 176.7
+      },
+      "status": {
+        "200": 10884
+      },
+      "replays": 574,
+      "errorRate": 0,
+      "conflictRate": 0,
+      "businessRejections": 0,
+      "lockConflicts": 0,
+      "outbox": {
+        "maxLagS": 0.9,
+        "pendingAtEnd": 33,
+        "drainS": 0.3
+      },
+      "consistency": {
+        "walletsChecked": 1,
+        "inconsistent": 0
+      }
+    }
+  ],
+  "ranAt": "2026-11-16T11:56:39.225Z"
+}

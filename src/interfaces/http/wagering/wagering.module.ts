@@ -134,6 +134,7 @@ const logWorker = (entry: WorkerLogEntry): void => {
         const env = loadEnv();
         return new OutboxPublisherWorker(new MikroOrmOutboxUnitOfWork(em), publisher, clock, metrics, logger, {
           retryPolicy: { baseDelayMs: 1000, maxDelayMs: env.outbox.maxBackoffMs },
+          parallelism: env.outbox.parallelism,
         });
       },
     },

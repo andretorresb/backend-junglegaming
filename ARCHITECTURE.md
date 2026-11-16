@@ -276,7 +276,8 @@ A direção do lançamento vem de `ledgerDirectionFor`, que é a única fonte da
 - Testado: falha depois da gravação da outbox desfaz tudo, sem evento órfão.
 
 ### 12.3 Publicação
-- `OutboxPublisherWorker`: cada mensagem é tratada em transação própria. Reivindica com `FOR UPDATE SKIP LOCKED`, publica no SQS, marca como publicada e comita.
+- `OutboxPublisherWorker`: cada transação reivindica um lote de até 10 mensagens com `FOR UPDATE SKIP LOCKED`, publica com `SendMessageBatch`, marca e comita. Por processo rodam `OUTBOX_PARALLELISM` faixas em paralelo (padrão 4), e o ciclo se repete sem esperar o intervalo enquanto o lote vem cheio. Falha de um evento dentro do lote só reagenda aquele evento.
+- A primeira versão publicava uma mensagem por transação e ficou em 36 eventos/s no teste de carga. A versão em lote chegou a 847 eventos/s (`docs/load-test.md`).
 - Falha de publicação: `scheduleRetry` com backoff exponencial (base 1s, teto `OUTBOX_MAX_BACKOFF_MS`), na mesma transação.
 - Fila de destino: `wager-events` (padrão, configurável por `EVENTS_QUEUE_NAME`). Fila padrão, não FIFO: a deduplicação é do consumidor, pelo `eventId`.
 - Filas criadas por `bun run localstack:init` (`scripts/localstack/init-queues.ts`). Os nomes e o limite de redrive vêm do ambiente (`queueSettingsFromEnv`), os mesmos que o consumidor e o publisher usam. Ver 16.7.
@@ -420,7 +421,7 @@ Invariante final: `assertLedgerInvariant` (saldo == soma do ledger) roda ao fim 
 ### 15.4 Limitações
 - **Publicação duplicada na outbox** é testada com uma falha simulada depois do envio (exceção), e não com a morte real do publisher. A morte real é coberta para o consumidor, que é o ponto de entrega ao sistema de negócio.
 - A reinicialização do serviço é testada com SIGTERM e SIGKILL reais. Não há reinício de LocalStack nem de PostgreSQL durante a suíte.
-- Testes de carga (diferencial opcional, seção 14 do enunciado) não foram implementados.
+- Teste de carga: `bun run test:load`, com resultados e análise em `docs/load-test.md`. Uma execução por configuração, no mesmo host.
 
 ## 16. Revisão final: trade-offs, desvios e limitações
 
@@ -454,7 +455,7 @@ Invariante final: `assertLedgerInvariant` (saldo == soma do ledger) roda ao fim 
 - **Paginação do ledger com escrita concorrente.** Um item commitado com `created_at` anterior ao cursor pode não aparecer na paginação em curso. Seção 11.2.
 - **Reconciliação só detecta.** Não corrige. Decisão operacional.
 - **Inbox e outbox sem retenção.** Crescem sem limite. Ficaria para uma rotina de limpeza.
-- **Sem load test.** O diferencial opcional da seção 14 não foi implementado.
+- **A outbox fica para trás sob carga máxima distribuída.** No teste de carga, a geração (cerca de 1.650 eventos/s) superou a publicação (847 eventos/s), e o lag chegou a 21 s, drenando em 23 s depois da carga. Ver `docs/load-test.md`.
 - **Publicação duplicada da outbox testada com falha simulada**, não com morte real do publisher. A morte real é testada para o consumidor.
 - **`FAULT_CRASH_AFTER_COMMIT` existe no código de produção**, desligado por padrão. Serve só para teste de recuperação.
 - **OpenTelemetry não implementado.** As portas `Logger` e `Metrics` permitem trocar a implementação.
