@@ -55,7 +55,7 @@ curl -s http://localhost:3000/health/live
 # {"status":"ok"}
 
 curl -s http://localhost:3000/health/ready
-# {"status":"ok","ok":true,"checks":{"postgres":"up","sqs":"up","draining":"up"}}
+# {"status":"ok","checks":{"postgres":"up","sqs":"up","draining":"up"}}
 ```
 
 ### Testes
